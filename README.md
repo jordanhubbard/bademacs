@@ -1,4 +1,4 @@
-# bademacs
+# bad-emacs
 
 A micro GNU Emacs (mg) compatible text editor implemented as a single bash
 shell function. No compiled languages, no dependencies beyond a standard
