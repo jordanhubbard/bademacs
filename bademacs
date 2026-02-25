@@ -1,0 +1,495 @@
+#!/bin/bash
+# bademacs - a lightweight emacs-like editor implemented in bash
+
+if [ $# -ne 1 ]; then
+    printf 'Usage: %s filename\n' "$(basename "$0")" >&2
+    exit 1
+fi
+
+FILENAME="$1"
+MODIFIED=0
+KILL_RING=""
+CTRL_X=0
+MSG=""
+
+declare -a LINES
+
+# Cursor and scroll state
+CUR_LINE=0
+CUR_COL=0
+TOP_LINE=0
+
+# Terminal dimensions
+TERM_ROWS=$(tput lines)
+TERM_COLS=$(tput cols)
+EDIT_ROWS=$((TERM_ROWS - 2))
+
+load_file() {
+    LINES=()
+    if [ -f "$FILENAME" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            LINES+=("$line")
+        done < "$FILENAME"
+    fi
+    [ ${#LINES[@]} -eq 0 ] && LINES=("")
+}
+
+save_file() {
+    local i
+    {
+        for ((i = 0; i < ${#LINES[@]}; i++)); do
+            printf '%s\n' "${LINES[$i]}"
+        done
+    } > "$FILENAME"
+    MODIFIED=0
+    MSG="Wrote $FILENAME"
+}
+
+clamp_cursor() {
+    local nlines=${#LINES[@]}
+    # Clamp line
+    [ $CUR_LINE -ge $nlines ] && CUR_LINE=$((nlines - 1))
+    [ $CUR_LINE -lt 0 ] && CUR_LINE=0
+    # Clamp column
+    local linelen=${#LINES[$CUR_LINE]}
+    [ $CUR_COL -gt $linelen ] && CUR_COL=$linelen
+    [ $CUR_COL -lt 0 ] && CUR_COL=0
+    # Scroll vertically
+    [ $CUR_LINE -lt $TOP_LINE ] && TOP_LINE=$CUR_LINE
+    [ $CUR_LINE -ge $((TOP_LINE + EDIT_ROWS)) ] && TOP_LINE=$((CUR_LINE - EDIT_ROWS + 1))
+}
+
+draw_screen() {
+    local row line_idx line status screen_row screen_col
+    for ((row = 0; row < EDIT_ROWS; row++)); do
+        line_idx=$((TOP_LINE + row))
+        tput cup $row 0
+        tput el
+        if [ $line_idx -lt ${#LINES[@]} ]; then
+            printf '%s' "${LINES[$line_idx]:0:$TERM_COLS}"
+        fi
+    done
+    # Status bar (reverse video)
+    tput cup $((TERM_ROWS - 2)) 0
+    tput smso
+    if [ $MODIFIED -eq 1 ]; then
+        status="**  ${FILENAME}  L$((CUR_LINE + 1))/$((${#LINES[@]}))  C$((CUR_COL + 1))  [modified]"
+    else
+        status="    ${FILENAME}  L$((CUR_LINE + 1))/$((${#LINES[@]}))  C$((CUR_COL + 1))"
+    fi
+    printf '%-*s' "$TERM_COLS" "$status"
+    tput rmso
+    # Message/minibuffer line
+    tput cup $((TERM_ROWS - 1)) 0
+    tput el
+    [ -n "$MSG" ] && printf '%s' "$MSG"
+    MSG=""
+    # Position cursor on screen
+    screen_row=$((CUR_LINE - TOP_LINE))
+    screen_col=$CUR_COL
+    [ $screen_col -ge $TERM_COLS ] && screen_col=$((TERM_COLS - 1))
+    tput cup $screen_row $screen_col
+}
+
+insert_char() {
+    local ch="$1" line="${LINES[$CUR_LINE]}"
+    LINES[$CUR_LINE]="${line:0:$CUR_COL}${ch}${line:$CUR_COL}"
+    CUR_COL=$((CUR_COL + 1))
+    MODIFIED=1
+}
+
+delete_char() {
+    local line="${LINES[$CUR_LINE]}" linelen
+    linelen=${#line}
+    if [ $CUR_COL -lt $linelen ]; then
+        LINES[$CUR_LINE]="${line:0:$CUR_COL}${line:$((CUR_COL + 1))}"
+        MODIFIED=1
+    elif [ $CUR_LINE -lt $((${#LINES[@]} - 1)) ]; then
+        LINES[$CUR_LINE]="${line}${LINES[$((CUR_LINE + 1))]}"
+        local new_lines=()
+        local i
+        for ((i = 0; i < ${#LINES[@]}; i++)); do
+            [ $i -ne $((CUR_LINE + 1)) ] && new_lines+=("${LINES[$i]}")
+        done
+        LINES=("${new_lines[@]}")
+        MODIFIED=1
+    fi
+}
+
+delete_backward() {
+    if [ $CUR_COL -gt 0 ]; then
+        local line="${LINES[$CUR_LINE]}"
+        CUR_COL=$((CUR_COL - 1))
+        LINES[$CUR_LINE]="${line:0:$CUR_COL}${line:$((CUR_COL + 1))}"
+        MODIFIED=1
+    elif [ $CUR_LINE -gt 0 ]; then
+        local prev_len=${#LINES[$((CUR_LINE - 1))]}
+        LINES[$((CUR_LINE - 1))]="${LINES[$((CUR_LINE - 1))]}${LINES[$CUR_LINE]}"
+        local new_lines=()
+        local i
+        for ((i = 0; i < ${#LINES[@]}; i++)); do
+            [ $i -ne $CUR_LINE ] && new_lines+=("${LINES[$i]}")
+        done
+        LINES=("${new_lines[@]}")
+        CUR_LINE=$((CUR_LINE - 1))
+        CUR_COL=$prev_len
+        MODIFIED=1
+    fi
+}
+
+kill_line() {
+    local line="${LINES[$CUR_LINE]}" linelen
+    linelen=${#line}
+    if [ $CUR_COL -lt $linelen ]; then
+        KILL_RING="${line:$CUR_COL}"
+        LINES[$CUR_LINE]="${line:0:$CUR_COL}"
+        MODIFIED=1
+    elif [ $CUR_LINE -lt $((${#LINES[@]} - 1)) ]; then
+        KILL_RING=""
+        LINES[$CUR_LINE]="${line}${LINES[$((CUR_LINE + 1))]}"
+        local new_lines=()
+        local i
+        for ((i = 0; i < ${#LINES[@]}; i++)); do
+            [ $i -ne $((CUR_LINE + 1)) ] && new_lines+=("${LINES[$i]}")
+        done
+        LINES=("${new_lines[@]}")
+        MODIFIED=1
+    fi
+}
+
+yank() {
+    local i
+    for ((i = 0; i < ${#KILL_RING}; i++)); do
+        insert_char "${KILL_RING:$i:1}"
+    done
+}
+
+new_line() {
+    local before="${LINES[$CUR_LINE]:0:$CUR_COL}"
+    local after="${LINES[$CUR_LINE]:$CUR_COL}"
+    LINES[$CUR_LINE]="$before"
+    local new_lines=()
+    local i
+    for ((i = 0; i < ${#LINES[@]}; i++)); do
+        new_lines+=("${LINES[$i]}")
+        [ $i -eq $CUR_LINE ] && new_lines+=("$after")
+    done
+    LINES=("${new_lines[@]}")
+    CUR_LINE=$((CUR_LINE + 1))
+    CUR_COL=0
+    MODIFIED=1
+}
+
+# Incremental search (direction: "fwd" or "bwd")
+do_isearch() {
+    local direction="$1"
+    local search="" ch ord found_line found_col
+
+    while true; do
+        tput cup $((TERM_ROWS - 1)) 0
+        tput el
+        if [ "$direction" = "fwd" ]; then
+            printf 'I-search: %s' "$search"
+        else
+            printf 'I-search backward: %s' "$search"
+        fi
+
+        IFS= read -r -s -n1 ch
+        printf -v ord '%d' "'$ch" 2>/dev/null || ord=0
+
+        case $ord in
+            27|7)  # ESC or C-g - cancel
+                MSG="Search cancelled"
+                return
+                ;;
+            13|10)  # Enter - accept and return
+                return
+                ;;
+            127|8)  # Backspace
+                [ ${#search} -gt 0 ] && search="${search:0:$((${#search} - 1))}"
+                ;;
+            *)
+                [ $ord -ge 32 ] && search="${search}${ch}"
+                ;;
+        esac
+
+        [ -z "$search" ] && continue
+
+        found_line=-1
+        found_col=-1
+        if [ "$direction" = "fwd" ]; then
+            local sl sc rest pos
+            for ((sl = CUR_LINE; sl < ${#LINES[@]}; sl++)); do
+                sc=0
+                [ $sl -eq $CUR_LINE ] && sc=$CUR_COL
+                rest="${LINES[$sl]:$sc}"
+                pos="${rest%%"$search"*}"
+                if [ "${#pos}" -lt "${#rest}" ]; then
+                    found_line=$sl
+                    found_col=$((sc + ${#pos}))
+                    break
+                fi
+            done
+        else
+            local sl pos rest p offset last_pos tmp
+            for ((sl = CUR_LINE; sl >= 0; sl--)); do
+                rest="${LINES[$sl]}"
+                [ $sl -eq $CUR_LINE ] && rest="${LINES[$sl]:0:$CUR_COL}"
+                last_pos=-1
+                offset=0
+                tmp="$rest"
+                while true; do
+                    p="${tmp%%"$search"*}"
+                    if [ "${#p}" -lt "${#tmp}" ]; then
+                        last_pos=$((offset + ${#p}))
+                        offset=$((offset + ${#p} + 1))
+                        tmp="${tmp:$((${#p} + 1))}"
+                    else
+                        break
+                    fi
+                done
+                if [ $last_pos -ge 0 ]; then
+                    found_line=$sl
+                    found_col=$last_pos
+                    break
+                fi
+            done
+        fi
+
+        if [ $found_line -ge 0 ]; then
+            CUR_LINE=$found_line
+            CUR_COL=$found_col
+            clamp_cursor
+            draw_screen
+        fi
+    done
+}
+
+ask_save_quit() {
+    tput cup $((TERM_ROWS - 1)) 0
+    tput el
+    printf 'Save modified buffer? (y/n) '
+    local ans
+    IFS= read -r -s -n1 ans
+    if [ "$ans" = "y" ] || [ "$ans" = "Y" ]; then
+        save_file
+    fi
+}
+
+cleanup() {
+    tput cnorm
+    tput rmcup 2>/dev/null
+    stty echo 2>/dev/null
+}
+
+main() {
+    trap cleanup EXIT INT TERM
+
+    tput smcup
+    stty -echo
+    tput civis
+    clear
+
+    load_file
+    clamp_cursor
+    draw_screen
+
+    local ch seq csi ord linelen
+
+    while true; do
+        tput cnorm
+
+        IFS= read -r -s -n1 ch
+        printf -v ord '%d' "'$ch" 2>/dev/null || ord=0
+
+        # Handle escape sequences
+        if [ $ord -eq 27 ]; then
+            IFS= read -r -s -n1 -t 0.05 seq
+            if [ $? -ne 0 ] || [ -z "$seq" ]; then
+                # Standalone ESC - cancel prefix/search
+                CTRL_X=0
+                MSG="Quit"
+                clamp_cursor
+                draw_screen
+                continue
+            fi
+            if [ "$seq" = "[" ]; then
+                IFS= read -r -s -n1 csi
+                CTRL_X=0
+                case "$csi" in
+                    A)  # Up arrow
+                        [ $CUR_LINE -gt 0 ] && CUR_LINE=$((CUR_LINE - 1))
+                        ;;
+                    B)  # Down arrow
+                        [ $CUR_LINE -lt $((${#LINES[@]} - 1)) ] && CUR_LINE=$((CUR_LINE + 1))
+                        ;;
+                    C)  # Right arrow
+                        linelen=${#LINES[$CUR_LINE]}
+                        if [ $CUR_COL -lt $linelen ]; then
+                            CUR_COL=$((CUR_COL + 1))
+                        elif [ $CUR_LINE -lt $((${#LINES[@]} - 1)) ]; then
+                            CUR_LINE=$((CUR_LINE + 1))
+                            CUR_COL=0
+                        fi
+                        ;;
+                    D)  # Left arrow
+                        if [ $CUR_COL -gt 0 ]; then
+                            CUR_COL=$((CUR_COL - 1))
+                        elif [ $CUR_LINE -gt 0 ]; then
+                            CUR_LINE=$((CUR_LINE - 1))
+                            CUR_COL=${#LINES[$CUR_LINE]}
+                        fi
+                        ;;
+                esac
+            else
+                # Meta key: ESC + char
+                CTRL_X=0
+                case "$seq" in
+                    f|F)  # M-f forward word
+                        linelen=${#LINES[$CUR_LINE]}
+                        while [ $CUR_COL -lt $linelen ] && [[ "${LINES[$CUR_LINE]:$CUR_COL:1}" =~ [[:space:]] ]]; do
+                            CUR_COL=$((CUR_COL + 1))
+                        done
+                        while [ $CUR_COL -lt $linelen ] && [[ ! "${LINES[$CUR_LINE]:$CUR_COL:1}" =~ [[:space:]] ]]; do
+                            CUR_COL=$((CUR_COL + 1))
+                        done
+                        ;;
+                    b|B)  # M-b backward word
+                        [ $CUR_COL -gt 0 ] && CUR_COL=$((CUR_COL - 1))
+                        while [ $CUR_COL -gt 0 ] && [[ "${LINES[$CUR_LINE]:$CUR_COL:1}" =~ [[:space:]] ]]; do
+                            CUR_COL=$((CUR_COL - 1))
+                        done
+                        while [ $CUR_COL -gt 0 ] && [[ ! "${LINES[$CUR_LINE]:$((CUR_COL - 1)):1}" =~ [[:space:]] ]]; do
+                            CUR_COL=$((CUR_COL - 1))
+                        done
+                        ;;
+                    v|V)  # M-v page up
+                        CUR_LINE=$((CUR_LINE - EDIT_ROWS))
+                        TOP_LINE=$((TOP_LINE - EDIT_ROWS))
+                        [ $TOP_LINE -lt 0 ] && TOP_LINE=0
+                        ;;
+                    '<')  # M-< beginning of buffer
+                        CUR_LINE=0; CUR_COL=0; TOP_LINE=0
+                        ;;
+                    '>')  # M-> end of buffer
+                        CUR_LINE=$((${#LINES[@]} - 1))
+                        CUR_COL=${#LINES[$CUR_LINE]}
+                        ;;
+                esac
+            fi
+            clamp_cursor
+            draw_screen
+            continue
+        fi
+
+        # C-x prefix
+        if [ $CTRL_X -eq 1 ]; then
+            CTRL_X=0
+            case $ord in
+                19)  # C-x C-s save
+                    save_file
+                    ;;
+                3)   # C-x C-c quit
+                    if [ $MODIFIED -eq 1 ]; then
+                        ask_save_quit
+                    fi
+                    break
+                    ;;
+            esac
+            clamp_cursor
+            draw_screen
+            continue
+        fi
+
+        # Regular control and printable characters
+        case $ord in
+            1)   # C-a beginning of line
+                CUR_COL=0
+                ;;
+            2)   # C-b backward char
+                if [ $CUR_COL -gt 0 ]; then
+                    CUR_COL=$((CUR_COL - 1))
+                elif [ $CUR_LINE -gt 0 ]; then
+                    CUR_LINE=$((CUR_LINE - 1))
+                    CUR_COL=${#LINES[$CUR_LINE]}
+                fi
+                ;;
+            4)   # C-d delete char
+                delete_char
+                ;;
+            5)   # C-e end of line
+                CUR_COL=${#LINES[$CUR_LINE]}
+                ;;
+            6)   # C-f forward char
+                linelen=${#LINES[$CUR_LINE]}
+                if [ $CUR_COL -lt $linelen ]; then
+                    CUR_COL=$((CUR_COL + 1))
+                elif [ $CUR_LINE -lt $((${#LINES[@]} - 1)) ]; then
+                    CUR_LINE=$((CUR_LINE + 1))
+                    CUR_COL=0
+                fi
+                ;;
+            7)   # C-g cancel
+                MSG="Quit"
+                ;;
+            8|127)  # C-h or DEL backspace
+                delete_backward
+                ;;
+            9)   # TAB
+                insert_char $'\t'
+                ;;
+            10|13)  # Enter
+                new_line
+                ;;
+            11)  # C-k kill line
+                kill_line
+                ;;
+            14)  # C-n next line
+                [ $CUR_LINE -lt $((${#LINES[@]} - 1)) ] && CUR_LINE=$((CUR_LINE + 1))
+                ;;
+            16)  # C-p previous line
+                [ $CUR_LINE -gt 0 ] && CUR_LINE=$((CUR_LINE - 1))
+                ;;
+            18)  # C-r reverse isearch
+                do_isearch "bwd"
+                ;;
+            19)  # C-s forward isearch
+                do_isearch "fwd"
+                ;;
+            22)  # C-v page down
+                CUR_LINE=$((CUR_LINE + EDIT_ROWS))
+                TOP_LINE=$((TOP_LINE + EDIT_ROWS))
+                ;;
+            24)  # C-x prefix
+                CTRL_X=1
+                MSG="C-x-"
+                clamp_cursor
+                draw_screen
+                continue
+                ;;
+            25)  # C-y yank
+                yank
+                ;;
+            26)  # C-z suspend
+                cleanup
+                kill -TSTP $$
+                tput smcup
+                stty -echo
+                tput civis
+                draw_screen
+                clamp_cursor
+                ;;
+            *)
+                # Printable ASCII (>= 32) or multibyte UTF-8 (ord=0 when printf can't parse)
+                if [ $ord -ge 32 ] || { [ $ord -eq 0 ] && [ -n "$ch" ]; }; then
+                    insert_char "$ch"
+                fi
+                ;;
+        esac
+
+        clamp_cursor
+        draw_screen
+    done
+}
+
+main
