@@ -76,7 +76,8 @@ em() {
     _em_cleanup() {
         ((_em_cleaned_up)) && return
         _em_cleaned_up=1
-        printf '%s' "${ESC}[?25h${ESC}[?1049l"
+        # Use hardcoded ESC byte so cleanup works even outside em() scope
+        printf '%s' $'\x1b[?25h\x1b[?1049l'
         [[ -n "$_em_stty_saved" ]] && stty "$_em_stty_saved" 2>/dev/null
         # Restore original traps before unsetting functions
         trap - EXIT INT TERM HUP WINCH
@@ -498,16 +499,21 @@ em() {
     }
 
     _em_scroll_down() {
-        local -i page=$((_em_rows - 4))
+        local -i visible=$((_em_rows - 2))
+        local -i page=$((visible - 2))
         ((page < 1)) && page=1
+        ((_em_top += page))
         ((_em_cy += page))
         _em_goal_col=-1
         _em_ensure_visible
     }
 
     _em_scroll_up() {
-        local -i page=$((_em_rows - 4))
+        local -i visible=$((_em_rows - 2))
+        local -i page=$((visible - 2))
         ((page < 1)) && page=1
+        ((_em_top -= page))
+        ((_em_top < 0)) && _em_top=0
         ((_em_cy -= page))
         _em_goal_col=-1
         _em_ensure_visible
@@ -1669,7 +1675,7 @@ em() {
             "C-y       Yank (paste)"
             "C-w       Kill (cut) region"
             "M-w       Copy region"
-            "C-SPC     Set mark"
+            "C-SPC / M-SPC  Set mark"
             "C-t       Transpose chars"
             "M-d       Kill word forward"
             "M-DEL     Kill word backward"
@@ -1942,7 +1948,7 @@ em() {
             "C-y")          _em_yank;;
             "C-w")          _em_kill_region;;
             "M-w")          _em_copy_region;;
-            "C-SPC")        _em_set_mark;;
+            "C-SPC"|"M- ")  _em_set_mark;;
             "C-l")          _em_recenter;;
             "C-g")          _em_keyboard_quit;;
             "C-h")          _em_read_help_key;;
@@ -1977,7 +1983,8 @@ em() {
 
     _em_init "$@"
 
-    while ((_em_running)); do
+    while :; do
+        ((_em_running)) || break
         _em_render
         _em_read_key
         _em_dispatch
