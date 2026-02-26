@@ -110,7 +110,7 @@ em() {
     _em_init() {
         _em_stty_saved=$(stty -g 2>/dev/null)
         _em_saved_traps=$(trap -p INT TERM HUP WINCH 2>/dev/null)
-        stty raw -echo -isig -ixon -ixoff -icrnl lnext undef 2>/dev/null
+        stty raw -echo -isig -ixon -ixoff -icrnl intr undef quit undef susp undef lnext undef 2>/dev/null
         # No EXIT trap — dangerous for shell functions (lingers after return)
         trap '_em_cleanup; return 130' INT
         trap '_em_cleanup; return 143' TERM
