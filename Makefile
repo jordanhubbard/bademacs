@@ -1,18 +1,14 @@
 SHELL := /bin/bash
-PREFIX ?= $(HOME)/.local/bin
 BASHRC ?= $(HOME)/.bashrc
-SCRIPT := em
+SCRIPT := $(abspath em)
 
 .PHONY: install uninstall check
 
 install:
-	@mkdir -p "$(PREFIX)"
-	@cp "$(SCRIPT)" "$(PREFIX)/$(SCRIPT)"
-	@chmod +x "$(PREFIX)/$(SCRIPT)"
 	@if ! grep -q 'source.*[/ ]em' "$(BASHRC)" 2>/dev/null; then \
 		echo '' >> "$(BASHRC)"; \
 		echo '# em - bad emacs clone (shell function)' >> "$(BASHRC)"; \
-		echo 'source "$(PREFIX)/$(SCRIPT)"' >> "$(BASHRC)"; \
+		echo 'source "$(SCRIPT)"' >> "$(BASHRC)"; \
 		echo "Added source line to $(BASHRC)"; \
 	else \
 		echo "$(BASHRC) already sources em"; \
@@ -20,7 +16,6 @@ install:
 	@echo "Installed. Open a new shell or: source $(BASHRC)"
 
 uninstall:
-	@rm -f "$(PREFIX)/$(SCRIPT)"
 	@if [ -f "$(BASHRC)" ]; then \
 		sed -i '' '/# em - bad emacs/d; /source.*[/ ]em[" ]*$$/d' "$(BASHRC)"; \
 		echo "Removed from $(BASHRC)"; \
@@ -28,4 +23,4 @@ uninstall:
 	@echo "Uninstalled."
 
 check:
-	@bash -n "$(SCRIPT)" && echo "Syntax OK"
+	@bash -n em && echo "Syntax OK"

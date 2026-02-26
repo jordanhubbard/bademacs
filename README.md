@@ -36,19 +36,19 @@ instantly -- there is no fork/exec overhead.
 
 ### Using the Makefile
 
-If you prefer, the included Makefile copies the script to
-`~/.local/bin/` and appends the source line to `~/.bashrc` for you:
+If you prefer, the included Makefile appends the source line to
+`~/.bashrc` for you (pointing directly at the repo — no copy):
 
 ```bash
-make install           # install and add to .bashrc
-make uninstall         # remove from .bashrc and delete the copy
+make install           # add source line to .bashrc
+make uninstall         # remove source line from .bashrc
 make check             # syntax-check the script
 ```
 
-You can override the install location and target rc file:
+You can override the target rc file:
 
 ```bash
-make install PREFIX=/usr/local/bin BASHRC=~/.bash_profile
+make install BASHRC=~/.bash_profile
 ```
 
 ### Standalone (no sourcing)
