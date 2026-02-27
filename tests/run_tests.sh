@@ -59,6 +59,9 @@ if [[ "$FILTER" == "all" || "$FILTER" == "bash" ]]; then
     run_test "open file" tests/test_bash_open_file.exp
     run_test "save file" tests/test_bash_save_file.exp
     run_test "upcase word (M-u)" tests/test_bash_upcase.exp
+    run_test "isearch highlight" tests/test_bash_isearch.exp
+    run_test "tab completion" tests/test_bash_tab_complete.exp
+    run_test "rectangle kill/yank" tests/test_bash_rectangle.exp
     echo ""
 fi
 
@@ -70,6 +73,9 @@ if [[ "$FILTER" == "all" || "$FILTER" == "zsh" ]]; then
         run_test "open file" tests/test_zsh_open_file.exp
         run_test "save file" tests/test_zsh_save_file.exp
         run_test "upcase word (M-u)" tests/test_zsh_upcase.exp
+        run_test "isearch highlight" tests/test_zsh_isearch.exp
+        run_test "tab completion" tests/test_zsh_tab_complete.exp
+        run_test "rectangle kill/yank" tests/test_zsh_rectangle.exp
         echo ""
     else
         echo "Zsh tests: SKIPPED (zsh not found)"

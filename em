@@ -72,8 +72,13 @@ em() {
     local -i _em_cleaned_up=0
     local _em_saved_traps=""
     local -i _em_fill_column=72
+    local -i _em_isearch_active=0
+    local -i _em_isearch_y=-1 _em_isearch_x=-1 _em_isearch_len=0
     local -i _em_recording=0
     local -a _em_macro_keys=()
+    local _em_clip_copy="" _em_clip_paste=""
+    local -a _em_rect_kill=()
+    local _em_comp_result=""
     local -A _em_bufs=()
     local -a _em_buf_ids=()
     local -i _em_cur_buf=0
@@ -125,6 +130,14 @@ em() {
             _em_new_buffer "*scratch*" ""
         fi
         _em_message="em: bad emacs (C-x C-c to quit, C-h b for help)"
+        # Detect system clipboard tool
+        if command -v pbcopy >/dev/null 2>&1; then
+            _em_clip_copy="pbcopy"; _em_clip_paste="pbpaste"
+        elif command -v xclip >/dev/null 2>&1; then
+            _em_clip_copy="xclip -selection clipboard"; _em_clip_paste="xclip -selection clipboard -o"
+        elif command -v xsel >/dev/null 2>&1; then
+            _em_clip_copy="xsel --clipboard --input"; _em_clip_paste="xsel --clipboard --output"
+        fi
     }
 
     _em_load_file() {
@@ -275,8 +288,28 @@ em() {
                 if ((${#display} > _em_cols)); then
                     display="${display:0:_em_cols}"
                 fi
+                # Pad to full width to avoid ESC[K flicker
+                local -i dlen=${#display}
+                if ((dlen < _em_cols)); then
+                    local pad=""
+                    printf -v pad '%*s' "$((_em_cols - dlen))" ''
+                    display+="$pad"
+                fi
+                # Isearch match highlighting (takes priority over region)
+                if ((_em_isearch_active && _em_isearch_y >= 0 && i == _em_isearch_y)); then
+                    _em_col_to_display "$line" "$_em_isearch_x"
+                    local -i mhs=$_em_display_col
+                    _em_col_to_display "$line" "$((_em_isearch_x + _em_isearch_len))"
+                    local -i mhe=$_em_display_col
+                    ((mhs > ${#display})) && mhs=${#display}
+                    ((mhe > ${#display})) && mhe=${#display}
+                    if ((mhs < mhe)); then
+                        output+="${display:0:mhs}${ESC}[1;7m${display:mhs:mhe-mhs}${ESC}[0m${display:mhe}"
+                    else
+                        output+="$display"
+                    fi
                 # Region highlighting
-                if ((reg_active && i >= reg_sy && i <= reg_ey)); then
+                elif ((reg_active && i >= reg_sy && i <= reg_ey)); then
                     local -i hs=0 he=${#display}
                     if ((i == reg_sy)); then
                         _em_col_to_display "$line" "$reg_sx"
@@ -296,8 +329,9 @@ em() {
                 else
                     output+="$display"
                 fi
+            else
+                output+="${ESC}[K"
             fi
-            output+="${ESC}[K"
         done
 
         # Status line
@@ -629,6 +663,16 @@ em() {
         _em_ensure_visible
     }
 
+    # ===== CLIPBOARD =====
+
+    _em_clipboard_copy() {
+        [[ -n "$_em_clip_copy" ]] && printf '%s' "$1" | eval "$_em_clip_copy" 2>/dev/null
+    }
+
+    _em_clipboard_paste() {
+        [[ -n "$_em_clip_paste" ]] && eval "$_em_clip_paste" 2>/dev/null
+    }
+
     # ===== KILL / YANK (basic) =====
 
     _em_kill_line() {
@@ -659,6 +703,7 @@ em() {
             fi
         fi
         (( ${#_em_kill_ring[@]} > 60 )) && _em_kill_ring=("${_em_kill_ring[@]:0:60}")
+        _em_clipboard_copy "${_em_kill_ring[0]}"
         _em_modified=1
         _em_goal_col=-1
     }
@@ -780,6 +825,7 @@ em() {
         _em_undo_push "replace_region" "$sy" "1" "$packed"
         _em_kill_ring=("$killed" "${_em_kill_ring[@]}")
         (( ${#_em_kill_ring[@]} > 60 )) && _em_kill_ring=("${_em_kill_ring[@]:0:60}")
+        _em_clipboard_copy "$killed"
         _em_cy=$sy
         _em_cx=$sx
         _em_mark_y=-1
@@ -811,7 +857,165 @@ em() {
         fi
         _em_kill_ring=("$copied" "${_em_kill_ring[@]}")
         (( ${#_em_kill_ring[@]} > 60 )) && _em_kill_ring=("${_em_kill_ring[@]:0:60}")
+        _em_clipboard_copy "$copied"
         _em_message="Region copied"
+    }
+
+    # ===== RECTANGLE COMMANDS =====
+
+    _em_rect_bounds() {
+        # Normalize mark/point into top-left (sy,sx) and bottom-right (ey,ex) columns
+        _em_rect_sy=$_em_mark_y; _em_rect_sx=$_em_mark_x
+        _em_rect_ey=$_em_cy; _em_rect_ex=$_em_cx
+        if ((_em_rect_sy > _em_rect_ey)); then
+            local -i t=$_em_rect_sy; _em_rect_sy=$_em_rect_ey; _em_rect_ey=$t
+        fi
+        if ((_em_rect_sx > _em_rect_ex)); then
+            local -i t=$_em_rect_sx; _em_rect_sx=$_em_rect_ex; _em_rect_ex=$t
+        fi
+    }
+
+    _em_kill_rectangle() {
+        if ((_em_mark_y < 0)); then
+            _em_message="The mark is not set now"
+            return
+        fi
+        local -i _em_rect_sy _em_rect_sx _em_rect_ey _em_rect_ex
+        _em_rect_bounds
+        # Save for undo
+        local packed="${_em_cy}${RS}${_em_cx}"
+        local -i j
+        for ((j = _em_rect_sy; j <= _em_rect_ey; j++)); do
+            packed+="${RS}${_em_lines[j]}"
+        done
+        _em_rect_kill=()
+        for ((j = _em_rect_sy; j <= _em_rect_ey; j++)); do
+            local line="${_em_lines[j]}"
+            local -i ll=${#line}
+            local -i sx=$_em_rect_sx ex=$_em_rect_ex
+            ((sx > ll)) && sx=$ll
+            ((ex > ll)) && ex=$ll
+            _em_rect_kill+=("${line:sx:ex-sx}")
+            _em_lines[j]="${line:0:sx}${line:ex}"
+        done
+        local -i nlines=$((_em_rect_ey - _em_rect_sy + 1))
+        _em_undo_push "replace_region" "$_em_rect_sy" "$nlines" "$packed"
+        _em_clipboard_copy "$(printf '%s\n' "${_em_rect_kill[@]}")"
+        _em_cy=$_em_rect_sy; _em_cx=$_em_rect_sx
+        _em_mark_y=-1; _em_mark_x=-1
+        _em_modified=1
+        _em_message="Rectangle killed"
+    }
+
+    _em_yank_rectangle() {
+        if [[ ${#_em_rect_kill[@]} -eq 0 ]]; then
+            _em_message="No rectangle to yank"
+            return
+        fi
+        # Save for undo
+        local packed="${_em_cy}${RS}${_em_cx}"
+        local -i nrect=${#_em_rect_kill[@]}
+        local -i j
+        # Ensure enough lines exist
+        while (( ${#_em_lines[@]} < _em_cy + nrect )); do
+            _em_lines+=("")
+        done
+        for ((j = 0; j < nrect; j++)); do
+            packed+="${RS}${_em_lines[_em_cy + j]}"
+        done
+        for ((j = 0; j < nrect; j++)); do
+            local line="${_em_lines[_em_cy + j]}"
+            local rect_str="${_em_rect_kill[j]}"
+            local -i ll=${#line}
+            # Pad with spaces if line is shorter than cursor column
+            if ((ll < _em_cx)); then
+                local pad=""
+                printf -v pad '%*s' "$((_em_cx - ll))" ''
+                line+="$pad"
+            fi
+            _em_lines[_em_cy + j]="${line:0:_em_cx}${rect_str}${line:_em_cx}"
+        done
+        _em_undo_push "replace_region" "$_em_cy" "$nrect" "$packed"
+        _em_modified=1
+        _em_message="Rectangle yanked"
+    }
+
+    _em_string_rectangle() {
+        if ((_em_mark_y < 0)); then
+            _em_message="The mark is not set now"
+            return
+        fi
+        _em_minibuffer_read "String rectangle: " "" || return
+        local str="$_em_mb_result"
+        local -i _em_rect_sy _em_rect_sx _em_rect_ey _em_rect_ex
+        _em_rect_bounds
+        # Save for undo
+        local packed="${_em_cy}${RS}${_em_cx}"
+        local -i j
+        for ((j = _em_rect_sy; j <= _em_rect_ey; j++)); do
+            packed+="${RS}${_em_lines[j]}"
+        done
+        for ((j = _em_rect_sy; j <= _em_rect_ey; j++)); do
+            local line="${_em_lines[j]}"
+            local -i ll=${#line}
+            local -i sx=$_em_rect_sx ex=$_em_rect_ex
+            ((sx > ll)) && sx=$ll
+            ((ex > ll)) && ex=$ll
+            _em_lines[j]="${line:0:sx}${str}${line:ex}"
+        done
+        local -i nlines=$((_em_rect_ey - _em_rect_sy + 1))
+        _em_undo_push "replace_region" "$_em_rect_sy" "$nlines" "$packed"
+        _em_mark_y=-1; _em_mark_x=-1
+        _em_modified=1
+        _em_message="String rectangle done"
+    }
+
+    _em_open_rectangle() {
+        if ((_em_mark_y < 0)); then
+            _em_message="The mark is not set now"
+            return
+        fi
+        local -i _em_rect_sy _em_rect_sx _em_rect_ey _em_rect_ex
+        _em_rect_bounds
+        local -i width=$((_em_rect_ex - _em_rect_sx))
+        ((width <= 0)) && return
+        # Save for undo
+        local packed="${_em_cy}${RS}${_em_cx}"
+        local pad=""
+        printf -v pad '%*s' "$width" ''
+        local -i j
+        for ((j = _em_rect_sy; j <= _em_rect_ey; j++)); do
+            packed+="${RS}${_em_lines[j]}"
+        done
+        for ((j = _em_rect_sy; j <= _em_rect_ey; j++)); do
+            local line="${_em_lines[j]}"
+            local -i ll=${#line}
+            local -i sx=$_em_rect_sx
+            ((sx > ll)) && sx=$ll
+            _em_lines[j]="${line:0:sx}${pad}${line:sx}"
+        done
+        local -i nlines=$((_em_rect_ey - _em_rect_sy + 1))
+        _em_undo_push "replace_region" "$_em_rect_sy" "$nlines" "$packed"
+        _em_mark_y=-1; _em_mark_x=-1
+        _em_modified=1
+        _em_message="Open rectangle done"
+    }
+
+    _em_read_cx_r_key() {
+        _em_message="C-x r-"
+        _em_render
+        _em_read_key
+        # Record for macros
+        if ((_em_recording)); then
+            _em_macro_keys+=("$_em_key")
+        fi
+        case "$_em_key" in
+            "k"|"SELF:k") _em_kill_rectangle;;
+            "y"|"SELF:y") _em_yank_rectangle;;
+            "t"|"SELF:t") _em_string_rectangle;;
+            "o"|"SELF:o") _em_open_rectangle;;
+            *)     _em_message="C-x r ${_em_key} is undefined";;
+        esac
     }
 
     # ===== SEARCH (basic) =====
@@ -847,6 +1051,8 @@ em() {
         local -i orig_y=$_em_cy orig_x=$_em_cx orig_top=$_em_top
         local -i found_y=$_em_cy found_x=$_em_cx
         local -i isearch_running=1
+        _em_isearch_active=1
+        _em_isearch_y=-1; _em_isearch_x=-1; _em_isearch_len=0
 
         while ((isearch_running)); do
             local prompt
@@ -863,6 +1069,7 @@ em() {
                 "C-g")
                     _em_cy=$orig_y; _em_cx=$orig_x; _em_top=$orig_top
                     _em_message="Quit"
+                    _em_isearch_active=0
                     isearch_running=0
                     ;;
                 "C-s")
@@ -871,8 +1078,10 @@ em() {
                         _em_isearch_next "$search" 1 "$found_y" "$((found_x + 1))"
                         if (($?)); then
                             _em_message="Failing I-search: ${search}"
+                            _em_isearch_y=-1
                         else
                             found_y=$_em_cy; found_x=$_em_cx
+                            _em_isearch_y=$found_y; _em_isearch_x=$found_x; _em_isearch_len=${#search}
                             _em_ensure_visible
                             _em_render
                         fi
@@ -884,8 +1093,10 @@ em() {
                         _em_isearch_next "$search" -1 "$found_y" "$((found_x - 1))"
                         if (($?)); then
                             _em_message="Failing I-search backward: ${search}"
+                            _em_isearch_y=-1
                         else
                             found_y=$_em_cy; found_x=$_em_cx
+                            _em_isearch_y=$found_y; _em_isearch_x=$found_x; _em_isearch_len=${#search}
                             _em_ensure_visible
                             _em_render
                         fi
@@ -893,6 +1104,7 @@ em() {
                     ;;
                 "C-m"|"C-j"|"ESC")
                     _em_search_str="$search"
+                    _em_isearch_active=0
                     isearch_running=0
                     ;;
                 "BACKSPACE")
@@ -903,11 +1115,15 @@ em() {
                             _em_isearch_next "$search" "$dir" "$orig_y" "$orig_x"
                             if ((!$?)); then
                                 found_y=$_em_cy; found_x=$_em_cx
+                                _em_isearch_y=$found_y; _em_isearch_x=$found_x; _em_isearch_len=${#search}
                                 _em_ensure_visible
                                 _em_render
+                            else
+                                _em_isearch_y=-1
                             fi
                         else
                             found_y=$orig_y; found_x=$orig_x
+                            _em_isearch_y=-1
                             _em_ensure_visible
                             _em_render
                         fi
@@ -918,14 +1134,17 @@ em() {
                     _em_isearch_next "$search" "$dir" "$found_y" "$found_x"
                     if (($?)); then
                         _em_message="Failing I-search: ${search}"
+                        _em_isearch_y=-1
                     else
                         found_y=$_em_cy; found_x=$_em_cx
+                        _em_isearch_y=$found_y; _em_isearch_x=$found_x; _em_isearch_len=${#search}
                         _em_ensure_visible
                         _em_render
                     fi
                     ;;
                 *)
                     _em_search_str="$search"
+                    _em_isearch_active=0
                     isearch_running=0
                     _em_dispatch
                     return
@@ -978,7 +1197,7 @@ em() {
     # ===== MINIBUFFER =====
 
     _em_minibuffer_read() {
-        local prompt="$1" input="${2:-}"
+        local prompt="$1" input="${2:-}" comp_type="${3:-}"
         local -i cursor=${#input}
         local -i mb_running=1
 
@@ -1024,6 +1243,15 @@ em() {
                 "C-k")
                     input="${input:0:cursor}"
                     ;;
+                "C-i")
+                    if [[ -n "$comp_type" ]]; then
+                        _em_complete "$input" "$comp_type"
+                        if [[ -n "$_em_comp_result" ]]; then
+                            input="$_em_comp_result"
+                            cursor=${#input}
+                        fi
+                    fi
+                    ;;
                 SELF:*)
                     local ch="${_em_key#SELF:}"
                     input="${input:0:cursor}${ch}${input:cursor}"
@@ -1034,6 +1262,123 @@ em() {
 
         _em_mb_result="$input"
         return 0
+    }
+
+    _em_complete() {
+        local input="$1" type="$2"
+        _em_comp_result=""
+        case "$type" in
+            file)    _em_complete_file "$input";;
+            buffer)  _em_complete_buffer "$input";;
+            command) _em_complete_command "$input";;
+        esac
+    }
+
+    _em_complete_file() {
+        local input="$1"
+        local expanded="${input/#\~/$HOME}"
+        local -a matches=()
+        local f
+        for f in ${expanded}*; do
+            [[ -e "$f" ]] || continue
+            matches+=("$f")
+        done
+        if [[ ${#matches[@]} -eq 0 ]]; then
+            _em_message="[No match]"
+            return
+        fi
+        if [[ ${#matches[@]} -eq 1 ]]; then
+            local result="${matches[0]}"
+            [[ "$result" == "$HOME"/* && "$input" == "~"* ]] && result="~${result#$HOME}"
+            [[ -d "${matches[0]}" ]] && result+="/"
+            _em_comp_result="$result"
+            return
+        fi
+        # Multiple matches: find common prefix
+        local prefix="${matches[0]}"
+        local m
+        for m in "${matches[@]:1}"; do
+            while [[ ${#prefix} -gt 0 && "$m" != "$prefix"* ]]; do
+                prefix="${prefix:0:${#prefix}-1}"
+            done
+        done
+        [[ "$prefix" == "$HOME"/* && "$input" == "~"* ]] && prefix="~${prefix#$HOME}"
+        _em_comp_result="$prefix"
+        # Show matches if no progress
+        if [[ "$input" == "$_em_comp_result" ]]; then
+            local display="" base
+            for m in "${matches[@]}"; do
+                base=$(basename "$m")
+                [[ -d "$m" ]] && base+="/"
+                [[ -n "$display" ]] && display+="  "
+                display+="$base"
+            done
+            _em_message="{${display}}"
+        fi
+    }
+
+    _em_complete_buffer() {
+        local input="$1"
+        local -a matches=()
+        local bid name
+        for bid in "${_em_buf_ids[@]}"; do
+            name="${_em_bufs["${bid}_name"]}"
+            [[ "$name" == "$input"* ]] && matches+=("$name")
+        done
+        if [[ ${#matches[@]} -eq 0 ]]; then
+            _em_message="[No match]"
+            return
+        fi
+        if [[ ${#matches[@]} -eq 1 ]]; then
+            _em_comp_result="${matches[0]}"
+            return
+        fi
+        local prefix="${matches[0]}"
+        local m
+        for m in "${matches[@]:1}"; do
+            while [[ ${#prefix} -gt 0 && "$m" != "$prefix"* ]]; do
+                prefix="${prefix:0:${#prefix}-1}"
+            done
+        done
+        _em_comp_result="$prefix"
+        if [[ "$input" == "$_em_comp_result" ]]; then
+            _em_message="{$(printf '%s  ' "${matches[@]}")}"
+        fi
+    }
+
+    _em_complete_command() {
+        local input="$1"
+        local -a commands=(
+            "goto-line" "what-line" "set-fill-column" "query-replace"
+            "save-buffer" "find-file" "write-file" "insert-file"
+            "kill-buffer" "switch-to-buffer" "list-buffers"
+            "save-buffers-kill-emacs" "describe-bindings" "help"
+            "clipboard-yank" "what-cursor-position"
+        )
+        local -a matches=()
+        local cmd
+        for cmd in "${commands[@]}"; do
+            [[ "$cmd" == "$input"* ]] && matches+=("$cmd")
+        done
+        if [[ ${#matches[@]} -eq 0 ]]; then
+            _em_message="[No match]"
+            return
+        fi
+        if [[ ${#matches[@]} -eq 1 ]]; then
+            _em_comp_result="${matches[0]}"
+            return
+        fi
+        local prefix="${matches[0]}"
+        local m
+        for m in "${matches[@]:1}"; do
+            while [[ ${#prefix} -gt 0 && "$m" != "$prefix"* ]]; do
+                prefix="${prefix:0:${#prefix}-1}"
+            done
+        done
+        _em_comp_result="$prefix"
+        if [[ "$input" == "$_em_comp_result" ]]; then
+            _em_message="{$(printf '%s  ' "${matches[@]}")}"
+        fi
     }
 
     # ===== FILE I/O =====
@@ -1070,7 +1415,7 @@ em() {
     _em_find_file() {
         local default="${_em_filename:-$PWD/}"
         [[ -n "$_em_filename" ]] && default="$(dirname "$_em_filename")/"
-        _em_minibuffer_read "Find file: " "$default" || return
+        _em_minibuffer_read "Find file: " "$default" "file" || return
         local path="$_em_mb_result"
         [[ -z "$path" ]] && return
         path="${path/#\~/$HOME}"
@@ -1090,7 +1435,7 @@ em() {
 
     _em_write_file() {
         local default="${_em_filename:-$PWD/}"
-        _em_minibuffer_read "Write file: " "$default" || return
+        _em_minibuffer_read "Write file: " "$default" "file" || return
         local path="$_em_mb_result"
         [[ -z "$path" ]] && return
         path="${path/#\~/$HOME}"
@@ -1100,7 +1445,7 @@ em() {
     }
 
     _em_insert_file() {
-        _em_minibuffer_read "Insert file: " "$PWD/" || return
+        _em_minibuffer_read "Insert file: " "$PWD/" "file" || return
         local path="$_em_mb_result"
         [[ -z "$path" ]] && return
         path="${path/#\~/$HOME}"
@@ -1263,7 +1608,7 @@ em() {
             names+="${_em_bufs["${bid}_name"]}"
             [[ -z "$default_name" ]] && default_name="${_em_bufs["${bid}_name"]}"
         done
-        _em_minibuffer_read "Switch to buffer (${names}): " "" || return
+        _em_minibuffer_read "Switch to buffer (${names}): " "" "buffer" || return
         local target="${_em_mb_result:-$default_name}"
         [[ -z "$target" ]] && return
         for bid in "${_em_buf_ids[@]}"; do
@@ -1281,7 +1626,7 @@ em() {
             _em_message="Cannot kill the only buffer"
             return
         fi
-        _em_minibuffer_read "Kill buffer (default ${_em_bufname}): " "" || return
+        _em_minibuffer_read "Kill buffer (default ${_em_bufname}): " "" "buffer" || return
         local target="${_em_mb_result:-$_em_bufname}"
         local -i target_bid=-1
         local bid
@@ -1650,7 +1995,7 @@ em() {
     # ===== M-x EXTENDED COMMANDS =====
 
     _em_execute_extended() {
-        _em_minibuffer_read "M-x " "" || return
+        _em_minibuffer_read "M-x " "" "command" || return
         local cmd="$_em_mb_result"
         [[ -z "$cmd" ]] && return
         case "$cmd" in
@@ -1704,6 +2049,17 @@ em() {
                 ;;
             describe-bindings|help)
                 _em_show_bindings
+                ;;
+            clipboard-yank)
+                local clip_text
+                clip_text=$(_em_clipboard_paste)
+                if [[ -n "$clip_text" ]]; then
+                    _em_kill_ring=("$clip_text" "${_em_kill_ring[@]}")
+                    (( ${#_em_kill_ring[@]} > 60 )) && _em_kill_ring=("${_em_kill_ring[@]:0:60}")
+                    _em_yank
+                else
+                    _em_message="System clipboard is empty"
+                fi
                 ;;
             *)
                 _em_message="Unknown command: $cmd"
@@ -1772,7 +2128,15 @@ em() {
             "C-x )     Stop macro recording"
             "C-x e     Execute macro"
             ""
+            "C-x r k   Kill rectangle"
+            "C-x r y   Yank rectangle"
+            "C-x r t   String rectangle"
+            "C-x r o   Open rectangle"
+            ""
+            "TAB        Complete in minibuffer (file/buffer/command)"
+            ""
             "M-x goto-line       Go to line number"
+            "M-x clipboard-yank  Paste from system clipboard"
             "M-x describe-bindings   Show this help"
             ""
             "[Press C-g or q to return]"
@@ -2010,6 +2374,7 @@ em() {
             "("|"SELF:(") _em_start_macro;;
             ")"|"SELF:)") _em_end_macro;;
             "e"|"SELF:e") _em_execute_macro;;
+            "r"|"SELF:r") _em_read_cx_r_key;;
             *)     _em_message="C-x ${_em_key} is undefined";;
         esac
     }

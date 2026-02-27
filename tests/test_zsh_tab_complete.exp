@@ -1,0 +1,50 @@
+#!/usr/bin/expect -f
+# Test: Tab completion for M-x commands in zsh
+set timeout 10
+
+spawn zsh -f -c "source ./em.zsh && em"
+
+expect {
+    "bad emacs" { puts "\nPASS: editor started" }
+    timeout { puts "\nFAIL: editor did not start"; exit 1 }
+}
+
+# M-x to open extended command prompt
+send "\x1b"
+sleep 0.15
+send "x"
+sleep 0.5
+
+expect {
+    "M-x" { puts "PASS: M-x prompt appeared" }
+    timeout { puts "FAIL: M-x prompt not visible"; exit 1 }
+}
+
+# Type partial command "goto" then TAB (0x09)
+send "goto"
+sleep 0.5
+send "\x09"
+sleep 1.0
+
+# Should complete to "goto-line"
+expect {
+    "goto-line" { puts "PASS: tab completed to goto-line" }
+    timeout { puts "FAIL: tab completion did not work"; exit 1 }
+}
+
+# Press Enter to execute goto-line, then cancel with C-g
+send "\r"
+sleep 0.3
+send "\x07"
+sleep 0.3
+
+# C-x C-c to quit
+send "\x18\x03"
+sleep 0.3
+
+expect {
+    eof { puts "PASS: editor exited cleanly" }
+    timeout { puts "FAIL: editor did not exit"; exit 1 }
+}
+
+puts "TEST PASSED: zsh tab completion"

@@ -50,6 +50,15 @@ jobs:
       - name: "Test: upcase word (M-u)"
         run: expect tests/test_bash_upcase.exp
 
+      - name: "Test: isearch highlight"
+        run: expect tests/test_bash_isearch.exp
+
+      - name: "Test: tab completion"
+        run: expect tests/test_bash_tab_complete.exp
+
+      - name: "Test: rectangle kill/yank"
+        run: expect tests/test_bash_rectangle.exp
+
   test-zsh:
     name: Zsh Integration Tests
     runs-on: ubuntu-latest
@@ -74,6 +83,15 @@ jobs:
 
       - name: "Test: upcase word (M-u)"
         run: expect tests/test_zsh_upcase.exp
+
+      - name: "Test: isearch highlight"
+        run: expect tests/test_zsh_isearch.exp
+
+      - name: "Test: tab completion"
+        run: expect tests/test_zsh_tab_complete.exp
+
+      - name: "Test: rectangle kill/yank"
+        run: expect tests/test_zsh_rectangle.exp
 
   test-macos:
     name: macOS Smoke Test

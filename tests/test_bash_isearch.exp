@@ -1,0 +1,55 @@
+#!/usr/bin/expect -f
+# Test: I-search highlights match in bash
+set timeout 10
+
+spawn bash --norc --noprofile -c "source ./em && em"
+
+expect {
+    "bad emacs" { puts "\nPASS: editor started" }
+    timeout { puts "\nFAIL: editor did not start"; exit 1 }
+}
+
+# Type some text
+send "hello world foo"
+sleep 0.5
+
+# C-s to start isearch
+send "\x13"
+sleep 0.3
+
+expect {
+    "I-search:" { puts "PASS: isearch prompt appeared" }
+    timeout { puts "FAIL: isearch prompt not visible"; exit 1 }
+}
+
+# Type search term
+send "world"
+sleep 0.5
+
+# Check that reverse video (bold+reverse = ESC[1;7m) appears for the match
+expect {
+    -re "\x1b\\[1;7m" { puts "PASS: match highlighting visible" }
+    timeout { puts "FAIL: no match highlighting"; exit 1 }
+}
+
+# C-g to cancel search
+send "\x07"
+sleep 0.3
+
+# C-x C-c to quit
+send "\x18\x03"
+sleep 0.3
+
+expect {
+    "Save*" {
+        send "n"
+        expect {
+            eof { puts "PASS: exited" }
+            timeout { puts "FAIL: did not exit"; exit 1 }
+        }
+    }
+    eof { puts "PASS: editor exited cleanly" }
+    timeout { puts "FAIL: editor did not exit"; exit 1 }
+}
+
+puts "TEST PASSED: bash isearch highlight"

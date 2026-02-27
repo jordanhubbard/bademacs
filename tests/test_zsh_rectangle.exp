@@ -1,0 +1,98 @@
+#!/usr/bin/expect -f
+# Test: Rectangle kill and yank in zsh
+set timeout 10
+
+spawn zsh -f -c "source ./em.zsh && em"
+
+expect {
+    "bad emacs" { puts "\nPASS: editor started" }
+    timeout { puts "\nFAIL: editor did not start"; exit 1 }
+}
+
+# Type multi-line text: "ABCD\nEFGH\nIJKL"
+send "ABCD"
+sleep 0.2
+send "\r"
+send "EFGH"
+sleep 0.2
+send "\r"
+send "IJKL"
+sleep 0.5
+
+# Go to beginning of buffer: M-<
+send "\x1b"
+sleep 0.15
+send "<"
+sleep 0.3
+
+# Move right 1 char to column 1
+send "\x06"
+sleep 0.2
+
+# Set mark: C-SPC
+send "\x00"
+sleep 0.2
+
+# Move down 2 lines: C-n C-n
+send "\x0e"
+sleep 0.2
+send "\x0e"
+sleep 0.2
+
+# Move right 1 more char to column 2 (now mark at (0,1), point at (2,2))
+send "\x06"
+sleep 0.2
+
+# Kill rectangle: C-x r k
+send "\x18"
+sleep 0.2
+send "r"
+sleep 0.2
+send "k"
+sleep 0.5
+
+# ACD appears in render before "Rectangle killed" status message
+expect {
+    "ACD" { puts "PASS: rectangle columns removed correctly" }
+    timeout { puts "FAIL: rectangle kill result incorrect"; exit 1 }
+}
+
+expect {
+    "Rectangle killed" { puts "PASS: rectangle kill succeeded" }
+    timeout { puts "FAIL: rectangle kill message not seen"; exit 1 }
+}
+
+# Now yank the rectangle back: go to beginning, C-x r y
+send "\x1b"
+sleep 0.15
+send "<"
+sleep 0.3
+send "\x18"
+sleep 0.2
+send "r"
+sleep 0.2
+send "y"
+sleep 0.5
+
+expect {
+    "Rectangle yanked" { puts "PASS: rectangle yank succeeded" }
+    timeout { puts "FAIL: rectangle yank message not seen"; exit 1 }
+}
+
+# C-x C-c to quit
+send "\x18\x03"
+sleep 0.3
+
+expect {
+    "Save*" {
+        send "n"
+        expect {
+            eof { puts "PASS: exited" }
+            timeout { puts "FAIL: did not exit"; exit 1 }
+        }
+    }
+    eof { puts "PASS: editor exited cleanly" }
+    timeout { puts "FAIL: editor did not exit"; exit 1 }
+}
+
+puts "TEST PASSED: zsh rectangle kill/yank"
