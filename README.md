@@ -1,12 +1,14 @@
 # em
 
-A bad emacs clone (mg-compatible) implemented as a single bash
-shell function. No compiled languages, no dependencies beyond a standard
-Linux install -- just bash and `/usr/bin`.
+A bad emacs clone (mg-compatible) implemented as a single shell
+function. No compiled languages, no dependencies beyond a standard
+Linux/macOS install -- just bash (or zsh) and `/usr/bin`.
 
 Features include multiple buffers, undo, a 60-entry kill ring, incremental
 search, query replace, keyboard macros, region highlighting, fill paragraph,
-and universal argument -- all in ~1950 lines of pure bash.
+and universal argument -- all in ~2000 lines of pure shell script.
+
+Both **bash** (`em`) and **zsh** (`em.zsh`) versions are included.
 
 ## Install
 
@@ -34,21 +36,30 @@ em                     # open a *scratch* buffer
 Because `em` is a shell function (not a subprocess), it starts
 instantly -- there is no fork/exec overhead.
 
-### Using the Makefile
+### Zsh Users
 
-If you prefer, the included Makefile appends the source line to
-`~/.bashrc` for you (pointing directly at the repo — no copy):
+If your shell is zsh, source `em.zsh` instead:
 
-```bash
-make install           # add source line to .bashrc
-make uninstall         # remove source line from .bashrc
-make check             # syntax-check the script
+```zsh
+echo 'source ~/em/em.zsh' >> ~/.zshrc
 ```
 
-You can override the target rc file:
+### Using the Makefile
+
+The Makefile auto-detects your shell and installs the right version:
 
 ```bash
-make install BASHRC=~/.bash_profile
+make install           # auto-detects bash/zsh, sources into correct rc file
+make uninstall         # remove source line
+make check             # syntax-check both versions
+```
+
+You can override the shell type or target rc file:
+
+```bash
+make install SHELL_TYPE=zsh              # force zsh install
+make install SHELL_TYPE=bash             # force bash install
+make install RCFILE=~/.bash_profile      # custom rc file
 ```
 
 ### Standalone (no sourcing)
@@ -158,5 +169,6 @@ function, but the behavior is identical.
 
 ## Why?
 
-Because every Linux box has bash, and sometimes you just need a quick
-editor that feels like emacs without installing anything.
+Because every Linux and macOS box has bash or zsh, and sometimes you
+just need a quick editor that feels like emacs without installing
+anything.
