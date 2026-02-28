@@ -8,22 +8,21 @@ Features include multiple buffers, undo, a 60-entry kill ring, incremental
 search, query replace, keyboard macros, region highlighting, fill paragraph,
 and universal argument -- all in ~2000 lines of pure shell script.
 
-Both **bash** (`em`) and **zsh** (`em.zsh`) versions are included.
+Both **bash** (`em.sh`) and **zsh** (`em.zsh`) versions are included.
 
 ## Install
 
 ### Quick Setup (source from .bashrc)
 
-Clone the repo (or just grab the `em` file) and add one line to
-your `~/.bashrc`:
+Clone the repo and use `make install`:
 
 ```bash
-# Clone it somewhere permanent
 git clone https://github.com/jordanhubbard/bad-emacs.git ~/em
-
-# Add this line to the end of your ~/.bashrc
-echo 'source ~/em/em' >> ~/.bashrc
+cd ~/em
+make install
 ```
+
+This copies `em.sh` and `em.zsh` to your home directory and adds `source` lines to both `~/.bashrc` and `~/.zshrc`.
 
 Now reload your shell and `em` is available as a command:
 
@@ -36,40 +35,22 @@ em                     # open a *scratch* buffer
 Because `em` is a shell function (not a subprocess), it starts
 instantly -- there is no fork/exec overhead.
 
-### Zsh Users
-
-If your shell is zsh, source `em.zsh` instead:
-
-```zsh
-echo 'source ~/em/em.zsh' >> ~/.zshrc
-```
-
 ### Using the Makefile
 
-The Makefile auto-detects your shell and installs the right version:
-
 ```bash
-make install           # auto-detects bash/zsh, sources into correct rc file
-make uninstall         # remove source line
+make install           # copy em.sh/em.zsh to ~/ and add source lines to rc files
+make uninstall         # remove copied files and source lines
 make check             # syntax-check both versions
-```
-
-You can override the shell type or target rc file:
-
-```bash
-make install SHELL_TYPE=zsh              # force zsh install
-make install SHELL_TYPE=bash             # force bash install
-make install RCFILE=~/.bash_profile      # custom rc file
 ```
 
 ### Standalone (no sourcing)
 
 It also works as a plain executable if you just want to run it without
-adding anything to your `.bashrc`:
+adding anything to your rc files:
 
 ```bash
-chmod +x em
-./em myfile.txt
+chmod +x em.sh
+./em.sh myfile.txt
 ```
 
 In this mode it runs as a script in a subshell rather than a shell

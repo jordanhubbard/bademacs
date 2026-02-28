@@ -2,7 +2,7 @@
 # Test: Rectangle kill and yank in bash
 set timeout 10
 
-spawn bash --norc --noprofile -c "source ./em && em"
+spawn bash --norc --noprofile -c "source ./em.sh && em"
 
 expect {
     "bad emacs" { puts "\nPASS: editor started" }

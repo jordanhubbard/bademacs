@@ -1,43 +1,40 @@
-# Detect user's shell before overriding SHELL for Make recipes
-USER_SHELL := $(shell echo $$SHELL)
-SHELL_TYPE ?= $(if $(findstring zsh,$(USER_SHELL)),zsh,bash)
-
-ifeq ($(SHELL_TYPE),zsh)
-  RCFILE ?= $(HOME)/.zshrc
-  SCRIPT := $(abspath em.zsh)
-  EM_FILE := em.zsh
-else
-  RCFILE ?= $(HOME)/.bashrc
-  SCRIPT := $(abspath em)
-  EM_FILE := em
-endif
-
 SHELL := /bin/bash
+SRCDIR := $(abspath .)
 
 .PHONY: install uninstall check test
 
 install:
-	@echo "Detected shell: $(SHELL_TYPE) (override with SHELL_TYPE=bash|zsh)"
-	@if ! grep -q 'source.*[/ ]em' "$(RCFILE)" 2>/dev/null; then \
-		echo '' >> "$(RCFILE)"; \
-		echo '# em - bad emacs clone (shell function)' >> "$(RCFILE)"; \
-		echo 'source "$(SCRIPT)"' >> "$(RCFILE)"; \
-		echo "Added source line to $(RCFILE)"; \
+	@echo "Installing bad-emacs to home directory..."
+	@cp "$(SRCDIR)/em.sh" "$(HOME)/.em.sh"
+	@cp "$(SRCDIR)/em.zsh" "$(HOME)/.em.zsh"
+	@echo "Installed ~/.em.sh and ~/.em.zsh"
+	@if ! grep -q 'source.*\.em\.sh' "$(HOME)/.bashrc" 2>/dev/null; then \
+		echo '' >> "$(HOME)/.bashrc"; \
+		echo '# em - bad emacs clone (shell function)' >> "$(HOME)/.bashrc"; \
+		echo 'source "$(HOME)/.em.sh"' >> "$(HOME)/.bashrc"; \
+		echo "Added source line to ~/.bashrc"; \
 	else \
-		echo "$(RCFILE) already sources em"; \
+		echo "~/.bashrc already sources ~/.em.sh"; \
 	fi
-	@echo "Installed. Open a new shell or: source $(RCFILE)"
+	@if ! grep -q 'source.*\.em\.zsh' "$(HOME)/.zshrc" 2>/dev/null; then \
+		echo '' >> "$(HOME)/.zshrc"; \
+		echo '# em - bad emacs clone (shell function)' >> "$(HOME)/.zshrc"; \
+		echo 'source "$(HOME)/.em.zsh"' >> "$(HOME)/.zshrc"; \
+		echo "Added source line to ~/.zshrc"; \
+	else \
+		echo "~/.zshrc already sources ~/.em.zsh"; \
+	fi
+	@echo "Installed. Open a new shell or source your rc file."
 
 uninstall:
-	@if [ -f "$(RCFILE)" ]; then \
-		sed -i '' '/# em - bad emacs/d; /source.*[/ ]em[" ]*$$/d' "$(RCFILE)"; \
-		echo "Removed from $(RCFILE)"; \
-	fi
-	@echo "Uninstalled."
+	@rm -f "$(HOME)/.em.sh" "$(HOME)/.em.zsh"
+	@[ -f "$(HOME)/.bashrc" ] && sed -i '' '/# em - bad emacs/d; /source.*\.em\.\(sh\|zsh\)/d' "$(HOME)/.bashrc" || true
+	@[ -f "$(HOME)/.zshrc" ] && sed -i '' '/# em - bad emacs/d; /source.*\.em\.\(sh\|zsh\)/d' "$(HOME)/.zshrc" || true
+	@echo "Uninstalled bad-emacs."
 
 check:
 	@echo "Checking bash version..."
-	@bash -n em && echo "  em: Syntax OK"
+	@bash -n em.sh && echo "  em.sh: Syntax OK"
 	@echo "Checking zsh version..."
 	@zsh -n em.zsh && echo "  em.zsh: Syntax OK"
 

@@ -20,7 +20,7 @@ jobs:
         run: zsh --version
 
       - name: Syntax check bash version
-        run: bash -n em
+        run: bash -n em.sh
 
       - name: Syntax check zsh version
         run: zsh -n em.zsh

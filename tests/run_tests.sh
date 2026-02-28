@@ -30,8 +30,8 @@ echo ""
 
 # Syntax checks
 echo "Syntax checks:"
-printf "  %-40s " "bash syntax (bash -n em)"
-if bash -n em 2>&1; then
+printf "  %-40s " "bash syntax (bash -n em.sh)"
+if bash -n em.sh 2>&1; then
     echo "PASS"
     ((PASS++))
 else
