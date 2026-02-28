@@ -30,7 +30,8 @@
 #   C-u N      universal arg     C-q        quoted insert
 #   M-q        fill paragraph    M-x        extended command
 #   C-_ / C-x u  undo            C-g        cancel
-#   C-h b      describe bindings
+#   C-z        suspend           C-h b      describe bindings
+#   C-i/TAB    indent line       Shift-TAB  dedent line
 
 em() {
     # Ensure clean zsh options scoped to this function
@@ -103,6 +104,18 @@ em() {
         for fn in ${(k)functions}; do
             [[ "$fn" == _em_* ]] && unset -f "$fn" 2>/dev/null
         done
+    }
+
+    _em_suspend() {
+        # Restore terminal to normal state, suspend, reinit on resume
+        printf '%s' $'\x1b[0m\x1b[?25h\x1b[?1049l'
+        stty "$_em_stty_saved" 2>/dev/null || stty sane 2>/dev/null
+        kill -TSTP $$
+        # Resumed (SIGCONT received) — reinitialize terminal
+        stty raw -echo -isig -ixon -ixoff -icrnl intr undef quit undef susp undef lnext undef 2>/dev/null
+        printf '%s' "${ESC}[?1049h${ESC}[?25l"
+        _em_handle_resize
+        _em_message="Resumed"
     }
 
     _em_handle_resize() {
@@ -442,6 +455,7 @@ em() {
                             *) _em_key="UNKNOWN"; return;;
                         esac
                         ;;
+                    Z) _em_key="SHIFT-TAB"; return;;
                     *) _em_key="UNKNOWN"; return;;
                 esac
             elif [[ "$char2" == "O" ]]; then
@@ -467,6 +481,9 @@ em() {
             local letter="${_em_abc: ord-1:1}"
             _em_key="C-${letter}"
             return
+        elif ((ord == 31)); then
+            _em_key="C-_"
+            return
         elif ((ord == 127 || ord == 8)); then
             _em_key="BACKSPACE"
             return
@@ -482,16 +499,18 @@ em() {
     _em_ensure_visible() {
         local -i total=${#_em_lines[@]}
         local -i visible=$((_em_rows - 2))
+        local -i margin=$((_em_rows / 5))
+        ((margin < 2)) && margin=2
         ((_em_cy < 0)) && _em_cy=0
         ((_em_cy >= total)) && _em_cy=$((total - 1))
         ((_em_cx < 0)) && _em_cx=0
         local -i line_len=${#_em_lines[_em_cy]}
         ((_em_cx > line_len)) && _em_cx=$line_len
-        if ((_em_cy < _em_top)); then
-            _em_top=$_em_cy
+        if ((_em_cy < _em_top + margin)); then
+            _em_top=$((_em_cy - margin))
         fi
-        if ((_em_cy >= _em_top + visible)); then
-            _em_top=$((_em_cy - visible + 1))
+        if ((_em_cy >= _em_top + visible - margin)); then
+            _em_top=$((_em_cy - visible + margin + 1))
         fi
         ((_em_top < 0)) && _em_top=0
     }
@@ -594,6 +613,71 @@ em() {
         local -i visible=$((_em_rows - 2))
         _em_top=$((_em_cy - visible / 2))
         ((_em_top < 0)) && _em_top=0
+    }
+
+    _em_indent_line() {
+        local -i sy ey
+        if ((_em_mark_y >= 0)); then
+            sy=$_em_mark_y; ey=$_em_cy
+            ((sy > ey)) && { local -i t=$sy; sy=$ey; ey=$t; }
+        else
+            sy=$_em_cy; ey=$_em_cy
+        fi
+        local packed="${_em_cy}${RS}${_em_cx}"
+        local -i j
+        for ((j = sy; j <= ey; j++)); do
+            packed+="${RS}${_em_lines[j]}"
+        done
+        _em_undo_push "replace_region" "$sy" "$((ey - sy + 1))" "$packed"
+        for ((j = sy; j <= ey; j++)); do
+            _em_lines[j]="  ${_em_lines[j]}"
+        done
+        ((_em_cx += 2))
+        _em_mark_y=-1; _em_mark_x=-1
+        _em_modified=1
+        _em_goal_col=-1
+    }
+
+    _em_dedent_line() {
+        local -i sy ey
+        if ((_em_mark_y >= 0)); then
+            sy=$_em_mark_y; ey=$_em_cy
+            ((sy > ey)) && { local -i t=$sy; sy=$ey; ey=$t; }
+        else
+            sy=$_em_cy; ey=$_em_cy
+        fi
+        # First pass: compute new lines and track changes
+        local -i cx_adj=0 changed=0
+        local -a dl_new=()
+        local -i j
+        for ((j = sy; j <= ey; j++)); do
+            local dl="${_em_lines[j]}"
+            local -i dr=0
+            if [[ "$dl" == "  "* ]]; then
+                dl_new+=("${dl:2}"); dr=2
+            elif [[ "$dl" == " "* ]]; then
+                dl_new+=("${dl:1}"); dr=1
+            else
+                dl_new+=("$dl")
+            fi
+            ((dr > 0)) && ((changed++))
+            ((j == _em_cy)) && cx_adj=$dr
+        done
+        if ((changed > 0)); then
+            local packed="${_em_cy}${RS}${_em_cx}"
+            for ((j = sy; j <= ey; j++)); do
+                packed+="${RS}${_em_lines[j]}"
+            done
+            _em_undo_push "replace_region" "$sy" "$((ey - sy + 1))" "$packed"
+            for ((j = sy; j <= ey; j++)); do
+                _em_lines[j]="${dl_new[j - sy]}"
+            done
+            ((_em_cx -= cx_adj))
+            ((_em_cx < 0)) && _em_cx=0
+            _em_modified=1
+        fi
+        _em_mark_y=-1; _em_mark_x=-1
+        _em_goal_col=-1
     }
 
     # ===== BASIC EDITING =====
@@ -2069,75 +2153,82 @@ em() {
         local -i saved_cy=$_em_cy saved_cx=$_em_cx saved_top=$_em_top
         local -i saved_mod=$_em_modified
         local saved_name="$_em_bufname" saved_file="$_em_filename"
-        _em_lines=(
-            "em keybindings"
-            "=============="
-            ""
-            "C-x C-c   Quit"
-            "C-x C-s   Save buffer"
-            "C-x C-f   Find (open) file"
-            "C-x C-w   Write file (save as)"
-            "C-x C-x   Exchange point and mark"
-            "C-x i     Insert file"
-            "C-x u     Undo"
-            "C-x h     Mark whole buffer"
-            "C-x =     What cursor position"
-            ""
-            "C-f/C-b   Forward/backward char"
-            "C-n/C-p   Next/previous line"
-            "C-a/C-e   Beginning/end of line"
-            "M-f/M-b   Forward/backward word"
-            "M-<       Beginning of buffer"
-            "M->       End of buffer"
-            "C-v/M-v   Page down/up"
-            "C-l       Recenter"
-            ""
-            "C-d       Delete char forward"
-            "Backspace Delete char backward"
-            "C-k       Kill (cut) to end of line"
-            "C-y       Yank (paste)"
-            "C-w       Kill (cut) region"
-            "M-w       Copy region"
-            "C-SPC / M-SPC  Set mark"
-            "C-t       Transpose chars"
-            "M-d       Kill word forward"
-            "M-DEL     Kill word backward"
-            "M-c/M-l/M-u  Capitalize/downcase/upcase word"
-            ""
-            "C-s       Isearch forward"
-            "C-r       Isearch backward"
-            "M-%       Query replace"
-            ""
-            "C-o       Open line"
-            "C-u N     Universal argument (repeat N times)"
-            "C-q       Quoted insert"
-            "M-q       Fill paragraph"
-            "M-x       Extended command"
-            "C-g       Cancel"
-
-            "C-_ / C-x u  Undo"
-            ""
-            "C-x b     Switch buffer"
-            "C-x k     Kill buffer"
-            "C-x C-b   List buffers"
-            ""
-            "C-x (     Start macro recording"
-            "C-x )     Stop macro recording"
-            "C-x e     Execute macro"
-            ""
-            "C-x r k   Kill rectangle"
-            "C-x r y   Yank rectangle"
-            "C-x r t   String rectangle"
-            "C-x r o   Open rectangle"
-            ""
-            "TAB        Complete in minibuffer (file/buffer/command)"
-            ""
-            "M-x goto-line       Go to line number"
-            "M-x clipboard-yank  Paste from system clipboard"
-            "M-x describe-bindings   Show this help"
-            ""
-            "[Press C-g or q to return]"
-        )
+        local row=""
+        _em_lines=()
+        _em_lines+=("em keybindings")
+        _em_lines+=("==============")
+        _em_lines+=("")
+        printf -v row '%-38s  %s' "FILE / BUFFER" "EDITING"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-x C-c   Quit" "C-d / DEL   Delete char fwd"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-x C-s   Save buffer" "BACKSPACE   Delete char bkwd"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-x C-f   Find (open) file" "C-k         Kill to end of line"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-x C-w   Write file (save as)" "C-y         Yank (paste)"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-x i     Insert file" "C-w         Kill region"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-x b     Switch buffer" "M-w         Copy region"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-x k     Kill buffer" "C-SPC / M-SPC  Set mark"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-x C-b   List buffers" "C-t         Transpose chars"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-x h     Mark whole buffer" "M-d / M-DEL Kill word fwd/bkwd"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-x =     What cursor position" "M-c/l/u     Cap/down/upcase word"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-x C-x   Exchange pt/mark" "C-i / TAB   Indent line (+2 sp)"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-x u / C-_   Undo" "SHIFT-TAB   Dedent line (-2 sp)"
+        _em_lines+=("$row")
+        _em_lines+=("")
+        printf -v row '%-38s  %s' "MOVEMENT" "SEARCH"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-f / RIGHT   Forward char" "C-s         Isearch forward"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-b / LEFT    Backward char" "C-r         Isearch backward"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-n / DOWN    Next line" "M-%         Query replace"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-p / UP      Previous line" ""
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-a / HOME    Beginning of line" "MISC"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-e / END     End of line" "C-o         Open line"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "M-f / M-b     Fwd/bkwd word" "C-u N       Universal argument"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "M-< / M->     Beg/end of buffer" "C-q         Quoted insert"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-v / PGDN    Page down" "M-q         Fill paragraph"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "M-v / PGUP    Page up" "M-x         Extended command"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-l           Recenter" "C-g         Cancel"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-z           Suspend" "C-h b       Describe bindings"
+        _em_lines+=("$row")
+        _em_lines+=("")
+        printf -v row '%-38s  %s' "RECTANGLES (C-x r)" "MACROS (C-x)"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-x r k   Kill rectangle" "C-x (       Start macro"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-x r y   Yank rectangle" "C-x )       Stop macro"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-x r t   String rectangle" "C-x e       Execute macro"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-x r o   Open rectangle" ""
+        _em_lines+=("$row")
+        _em_lines+=("")
+        _em_lines+=("TAB   Complete in minibuffer (file/buffer/command)")
+        _em_lines+=("M-x goto-line           Go to line number")
+        _em_lines+=("M-x clipboard-yank      Paste from OS clipboard")
+        _em_lines+=("M-x describe-bindings   Show this help")
+        _em_lines+=("")
+        _em_lines+=("[Press C-g or q to return]")
         _em_cy=0; _em_cx=0; _em_top=0
         _em_bufname="*Help*"
         _em_filename=""
@@ -2414,6 +2505,9 @@ em() {
             "C-q")          _em_quoted_insert;;
 
             "C-_")          _em_undo;;
+            "C-z")          _em_suspend;;
+            "C-i")          _em_indent_line;;
+            "SHIFT-TAB")    _em_dedent_line;;
             "M-f")          _em_forward_word;;
             "M-b")          _em_backward_word;;
             "M-d")          _em_kill_word;;
