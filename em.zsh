@@ -2,6 +2,7 @@
 #
 # Source this file in your .zshrc:  source /path/to/em.zsh
 # Then run:  em [filename]
+# Or run standalone:  zsh em.zsh [filename]
 #
 # Keybindings (mg/emacs compatible):
 #   C-x C-c    quit              C-x C-s    save
@@ -42,6 +43,13 @@ em() {
     # which kills the shell under set -e. Save and restore on exit.
     local _em_had_errexit=""
     [[ "$-" == *e* ]] && { _em_had_errexit=1; set +e; }
+
+    # Read piped stdin before entering raw mode
+    local _em_stdin_content=""
+    if [[ ! -t 0 ]]; then
+        _em_stdin_content=$(cat)
+        exec 0</dev/tty
+    fi
 
     # ===== LOCAL STATE =====
     local -a _em_lines=()
@@ -88,6 +96,7 @@ em() {
     local -a _em_buf_ids=()
     local -i _em_cur_buf=0
     local -i _em_buf_count=0
+    local -i _em_left=0
 
     # ===== INNER FUNCTIONS =====
 
@@ -130,6 +139,32 @@ em() {
     _em_init() {
         _em_stty_saved=$(stty -g 2>/dev/null)
         _em_saved_traps=$(trap -p INT TERM HUP WINCH 2>/dev/null)
+
+        # Load file BEFORE entering raw mode so C-c works during load
+        if [[ -n "$1" ]]; then
+            _em_new_buffer "$(basename "$1")" "$1"
+            printf 'Loading %s...' "$1" >&2
+            _em_load_file "$1"
+            local -i nlines=${#_em_lines[@]}
+            printf '\r\x1b[K' >&2
+            if ((nlines > 5000)); then
+                printf 'Warning: %s has %d lines. Large files may be slow. (C-c to abort)\n' "$1" "$nlines" >&2
+                sleep 1
+            fi
+        else
+            _em_new_buffer "*scratch*" ""
+        fi
+        # Load piped stdin into scratch buffer
+        if [[ -n "$_em_stdin_content" && -z "$_em_filename" ]]; then
+            _em_lines=()
+            local _line
+            while IFS= read -r _line || [[ -n "$_line" ]]; do
+                _em_lines+=("$_line")
+            done <<< "$_em_stdin_content"
+            [[ ${#_em_lines[@]} -eq 0 ]] && _em_lines=("")
+        fi
+
+        # Now enter raw mode and alternate screen
         stty raw -echo -isig -ixon -ixoff -icrnl intr undef quit undef susp undef lnext undef 2>/dev/null
         # No EXIT trap — dangerous for shell functions (lingers after return)
         trap '_em_cleanup; return 130' INT
@@ -138,12 +173,6 @@ em() {
         trap '_em_handle_resize' WINCH
         printf '%s' "${ESC}[?1049h${ESC}[?25h"
         _em_handle_resize
-        if [[ -n "$1" ]]; then
-            _em_new_buffer "$(basename "$1")" "$1"
-            _em_load_file "$1"
-        else
-            _em_new_buffer "*scratch*" ""
-        fi
         _em_message="em: bad emacs [zsh] (C-x C-c to quit, C-h b for help)"
         # Detect system clipboard tool
         if command -v pbcopy >/dev/null 2>&1; then
@@ -170,6 +199,7 @@ em() {
         _em_cy=0
         _em_cx=0
         _em_top=0
+        _em_left=0
         _em_undo=()
     }
 
@@ -368,10 +398,9 @@ em() {
             if ((i < ${#_em_lines[@]})); then
                 local line="${_em_lines[i]}"
                 _em_expand_tabs "$line"
-                local display="${_em_expanded_line}"
-                if ((${#display} > _em_cols)); then
-                    display="${display:0: _em_cols}"
-                fi
+                local full_display="${_em_expanded_line}"
+                # Apply horizontal scroll offset
+                local display="${full_display: _em_left: _em_cols}"
                 # Pad to full width to avoid ESC[K flicker
                 local -i dlen=${#display}
                 if ((dlen < _em_cols)); then
@@ -382,11 +411,13 @@ em() {
                 # Isearch match highlighting (takes priority over region)
                 if ((_em_isearch_active && _em_isearch_y >= 0 && i == _em_isearch_y)); then
                     _em_col_to_display "$line" "$_em_isearch_x"
-                    local -i mhs=$_em_display_col
+                    local -i mhs=$((_em_display_col - _em_left))
                     _em_col_to_display "$line" "$((_em_isearch_x + _em_isearch_len))"
-                    local -i mhe=$_em_display_col
-                    ((mhs > ${#display})) && mhs=${#display}
-                    ((mhe > ${#display})) && mhe=${#display}
+                    local -i mhe=$((_em_display_col - _em_left))
+                    ((mhs < 0)) && mhs=0
+                    ((mhe < 0)) && mhe=0
+                    ((mhs > _em_cols)) && mhs=$_em_cols
+                    ((mhe > _em_cols)) && mhe=$_em_cols
                     if ((mhs < mhe)); then
                         output+="${display:0: mhs}${ESC}[1;7m${display: mhs: mhe-mhs}${ESC}[0m${display: mhe}"
                     else
@@ -394,17 +425,19 @@ em() {
                     fi
                 # Region highlighting
                 elif ((reg_active && i >= reg_sy && i <= reg_ey)); then
-                    local -i hs=0 he=${#display}
+                    local -i hs=0 he=$_em_cols
                     if ((i == reg_sy)); then
                         _em_col_to_display "$line" "$reg_sx"
-                        hs=$_em_display_col
+                        hs=$((_em_display_col - _em_left))
                     fi
                     if ((i == reg_ey)); then
                         _em_col_to_display "$line" "$reg_ex"
-                        he=$_em_display_col
+                        he=$((_em_display_col - _em_left))
                     fi
-                    ((hs > ${#display})) && hs=${#display}
-                    ((he > ${#display})) && he=${#display}
+                    ((hs < 0)) && hs=0
+                    ((he < 0)) && he=0
+                    ((hs > _em_cols)) && hs=$_em_cols
+                    ((he > _em_cols)) && he=$_em_cols
                     if ((hs < he)); then
                         output+="${display:0: hs}${ESC}[7m${display: hs: he-hs}${ESC}[0m${display: he}"
                     else
@@ -455,10 +488,10 @@ em() {
             fi
         fi
 
-        # Position cursor
+        # Position cursor (adjusted for horizontal scroll)
         local -i screen_cy=$((_em_cy - _em_top + 1))
         _em_col_to_display "${_em_lines[_em_cy]}" "$_em_cx"
-        local -i screen_cx=$((_em_display_col + 1))
+        local -i screen_cx=$((_em_display_col - _em_left + 1))
         output+="${ESC}[${screen_cy};${screen_cx}H"
         output+="${ESC}[?25h"
 
@@ -583,6 +616,17 @@ em() {
             _em_top=$((_em_cy - visible + margin + 1))
         fi
         ((_em_top < 0)) && _em_top=0
+        # Horizontal scrolling: keep cursor visible
+        _em_col_to_display "${_em_lines[_em_cy]}" "$_em_cx"
+        local -i dcol=$_em_display_col
+        local -i hmargin=8
+        ((hmargin > _em_cols / 4)) && hmargin=$((_em_cols / 4))
+        if ((dcol < _em_left)); then
+            _em_left=$((dcol - hmargin))
+        elif ((dcol >= _em_left + _em_cols)); then
+            _em_left=$((dcol - _em_cols + hmargin + 1))
+        fi
+        ((_em_left < 0)) && _em_left=0
     }
 
     # ===== MOVEMENT =====
@@ -703,7 +747,10 @@ em() {
             _em_lines[j]="  ${_em_lines[j]}"
         done
         ((_em_cx += 2))
-        _em_mark_y=-1; _em_mark_x=-1
+        # Preserve mark but adjust its column for the indentation
+        if ((_em_mark_y >= 0)); then
+            ((_em_mark_x += 2))
+        fi
         _em_modified=1
         _em_goal_col=-1
     }
@@ -744,9 +791,13 @@ em() {
             done
             ((_em_cx -= cx_adj))
             ((_em_cx < 0)) && _em_cx=0
+            # Preserve mark but adjust its column for the dedentation
+            if ((_em_mark_y >= 0 && _em_mark_x > 0)); then
+                ((_em_mark_x -= cx_adj))
+                ((_em_mark_x < 0)) && _em_mark_x=0
+            fi
             _em_modified=1
         fi
-        _em_mark_y=-1; _em_mark_x=-1
         _em_goal_col=-1
     }
 
@@ -1642,6 +1693,7 @@ em() {
         _em_bufs["${bid}_cy"]=$_em_cy
         _em_bufs["${bid}_cx"]=$_em_cx
         _em_bufs["${bid}_top"]=$_em_top
+        _em_bufs["${bid}_left"]=$_em_left
         _em_bufs["${bid}_mark_y"]=$_em_mark_y
         _em_bufs["${bid}_mark_x"]=$_em_mark_x
         _em_bufs["${bid}_modified"]=$_em_modified
@@ -1677,6 +1729,7 @@ em() {
         _em_cy=${_em_bufs["${bid}_cy"]:-0}
         _em_cx=${_em_bufs["${bid}_cx"]:-0}
         _em_top=${_em_bufs["${bid}_top"]:-0}
+        _em_left=${_em_bufs["${bid}_left"]:-0}
         _em_mark_y=${_em_bufs["${bid}_mark_y"]:-"-1"}
         _em_mark_x=${_em_bufs["${bid}_mark_x"]:-"-1"}
         _em_modified=${_em_bufs["${bid}_modified"]:-0}
@@ -1711,6 +1764,7 @@ em() {
         _em_bufs["${bid}_cy"]=0
         _em_bufs["${bid}_cx"]=0
         _em_bufs["${bid}_top"]=0
+        _em_bufs["${bid}_left"]=0
         _em_bufs["${bid}_mark_y"]=-1
         _em_bufs["${bid}_mark_x"]=-1
         _em_bufs["${bid}_modified"]=0
@@ -2607,3 +2661,8 @@ em() {
     [[ -n "$_em_had_errexit" ]] && set -e
     return 0
 }
+
+# Standalone execution: ./em.zsh [filename] or zsh em.zsh [filename]
+if [[ "$ZSH_EVAL_CONTEXT" == "toplevel" ]]; then
+    em "$@"
+fi
