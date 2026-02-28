@@ -2,7 +2,7 @@
 # Test: I-search highlights match in bash
 set timeout 10
 
-spawn bash --norc --noprofile -c "source ./em.sh && em"
+spawn bash --norc --noprofile ./em.sh
 
 expect {
     "bad emacs" { puts "\nPASS: editor started" }

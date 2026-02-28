@@ -9,7 +9,7 @@ puts $fd "Second Line"
 puts $fd "Third Line"
 close $fd
 
-spawn bash --norc --noprofile -c "source ./em.sh && em /tmp/em_test_input.txt"
+spawn bash --norc --noprofile ./em.sh /tmp/em_test_input.txt
 
 expect {
     "Hello World" { puts "\nPASS: file content rendered" }

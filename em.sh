@@ -6,6 +6,14 @@
 
 # Require bash 4+ (associative arrays, etc.)
 if [[ "${BASH_VERSINFO:-0}" -lt 4 ]]; then
+    # Standalone mode: find a bash 4+ on the system and re-exec with it
+    if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+        for _em_try_bash in /opt/homebrew/bin/bash /usr/local/bin/bash /usr/bin/bash; do
+            if [[ -x "$_em_try_bash" ]] && "$_em_try_bash" -c '[[ ${BASH_VERSINFO[0]} -ge 4 ]]' 2>/dev/null; then
+                exec "$_em_try_bash" "$0" "$@"
+            fi
+        done
+    fi
     echo "em requires Bash 4+. Install via: brew install bash" >&2
     return 2>/dev/null || exit 1
 fi

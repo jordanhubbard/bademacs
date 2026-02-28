@@ -5,7 +5,7 @@ set timeout 10
 set testfile "/tmp/em_test_save_output.txt"
 file delete -force $testfile
 
-spawn bash --norc --noprofile -c "source ./em.sh && em $testfile"
+spawn bash --norc --noprofile ./em.sh $testfile
 
 expect {
     "bad emacs" { puts "\nPASS: editor started" }
