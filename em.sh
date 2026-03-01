@@ -133,7 +133,7 @@ em() {
         stty "$_em_stty_saved" 2>/dev/null || stty sane 2>/dev/null
         kill -TSTP $$
         # Resumed (SIGCONT received) — reinitialize terminal
-        stty raw -echo -isig -ixon -ixoff -icrnl intr undef quit undef susp undef lnext undef 2>/dev/null
+        stty raw -echo -isig -ixon -ixoff -icrnl intr undef quit undef susp undef dsusp undef lnext undef 2>/dev/null
         printf '%s' "${ESC}[?1049h${ESC}[?25l"
         _em_handle_resize
         _em_message="Resumed"
@@ -177,7 +177,7 @@ em() {
         fi
 
         # Now enter raw mode and alternate screen
-        stty raw -echo -isig -ixon -ixoff -icrnl intr undef quit undef susp undef lnext undef 2>/dev/null
+        stty raw -echo -isig -ixon -ixoff -icrnl intr undef quit undef susp undef dsusp undef lnext undef 2>/dev/null
         # No EXIT trap — dangerous for shell functions (lingers after return)
         trap '_em_cleanup; return 130' INT
         trap '_em_cleanup; return 143' TERM
@@ -1219,6 +1219,56 @@ em() {
         _em_message="Open rectangle done"
     }
 
+    _em_copy_rectangle() {
+        if ((_em_mark_y < 0)); then
+            _em_message="The mark is not set now"
+            return
+        fi
+        local -i _em_rect_sy _em_rect_sx _em_rect_ey _em_rect_ex
+        _em_rect_bounds
+        _em_rect_kill=()
+        local -i j
+        for ((j = _em_rect_sy; j <= _em_rect_ey; j++)); do
+            local line="${_em_lines[j]}"
+            local -i ll=${#line}
+            local -i sx=$_em_rect_sx ex=$_em_rect_ex
+            ((sx > ll)) && sx=$ll
+            ((ex > ll)) && ex=$ll
+            _em_rect_kill+=("${line:sx:ex-sx}")
+        done
+        _em_clipboard_copy "$(printf '%s\n' "${_em_rect_kill[@]}")"
+        _em_message="Rectangle copied"
+    }
+
+    _em_delete_rectangle() {
+        if ((_em_mark_y < 0)); then
+            _em_message="The mark is not set now"
+            return
+        fi
+        local -i _em_rect_sy _em_rect_sx _em_rect_ey _em_rect_ex
+        _em_rect_bounds
+        # Save for undo
+        local packed="${_em_cy}${RS}${_em_cx}"
+        local -i j
+        for ((j = _em_rect_sy; j <= _em_rect_ey; j++)); do
+            packed+="${RS}${_em_lines[j]}"
+        done
+        for ((j = _em_rect_sy; j <= _em_rect_ey; j++)); do
+            local line="${_em_lines[j]}"
+            local -i ll=${#line}
+            local -i sx=$_em_rect_sx ex=$_em_rect_ex
+            ((sx > ll)) && sx=$ll
+            ((ex > ll)) && ex=$ll
+            _em_lines[j]="${line:0:sx}${line:ex}"
+        done
+        local -i nlines=$((_em_rect_ey - _em_rect_sy + 1))
+        _em_undo_push "replace_region" "$_em_rect_sy" "$nlines" "$packed"
+        _em_cy=$_em_rect_sy; _em_cx=$_em_rect_sx
+        _em_mark_y=-1; _em_mark_x=-1
+        _em_modified=1
+        _em_message="Rectangle deleted"
+    }
+
     _em_read_cx_r_key() {
         _em_message="C-x r-"
         _em_render
@@ -1232,6 +1282,8 @@ em() {
             "y"|"SELF:y") _em_yank_rectangle;;
             "t"|"SELF:t") _em_string_rectangle;;
             "o"|"SELF:o") _em_open_rectangle;;
+            "r"|"SELF:r") _em_copy_rectangle;;
+            "d"|"SELF:d") _em_delete_rectangle;;
             *)     _em_message="C-x r ${_em_key} is undefined";;
         esac
     }
@@ -1421,6 +1473,11 @@ em() {
 
         while ((mb_running)); do
             local display="${prompt}${input}"
+            # Show completion candidates / messages on the line above the minibuffer
+            local -i mb_msg_row=$((_em_rows - 1))
+            printf '%s' "${ESC}[${mb_msg_row};1H${ESC}[K"
+            [[ -n "$_em_message" ]] && printf '%s' "${_em_message:0:_em_cols}"
+            _em_message=""
             printf '%s' "${ESC}[${_em_rows};1H${ESC}[K${display:0:_em_cols}"
             local -i cpos=$((${#prompt} + cursor + 1))
             printf '%s' "${ESC}[${_em_rows};${cpos}H"
@@ -2296,9 +2353,6 @@ em() {
         local saved_name="$_em_bufname" saved_file="$_em_filename"
         local row=""
         _em_lines=()
-        _em_lines+=("em keybindings")
-        _em_lines+=("==============")
-        _em_lines+=("")
         printf -v row '%-38s  %s' "FILE / BUFFER" "EDITING"
         _em_lines+=("$row")
         printf -v row '%-38s  %s' "C-x C-c   Quit" "C-d / DEL   Delete char fwd"
@@ -2359,7 +2413,11 @@ em() {
         _em_lines+=("$row")
         printf -v row '%-38s  %s' "C-x r y   Yank rectangle" "C-x )       Stop macro"
         _em_lines+=("$row")
-        printf -v row '%-38s  %s' "C-x r t   String rectangle" "C-x e       Execute macro"
+        printf -v row '%-38s  %s' "C-x r r   Copy rectangle" "C-x e       Execute macro"
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-x r d   Delete rectangle" ""
+        _em_lines+=("$row")
+        printf -v row '%-38s  %s' "C-x r t   String rectangle" ""
         _em_lines+=("$row")
         printf -v row '%-38s  %s' "C-x r o   Open rectangle" ""
         _em_lines+=("$row")
