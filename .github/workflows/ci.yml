@@ -108,6 +108,43 @@ jobs:
       - name: "Test: rectangle kill/yank"
         run: expect tests/test_zsh_rectangle.exp
 
+  test-scm:
+    name: Scheme Editor Tests
+    runs-on: ubuntu-latest
+    needs: syntax-check
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install expect
+        run: sudo apt-get update && sudo apt-get install -y expect
+
+      - name: Install sheme
+        run: |
+          git clone --depth 1 https://github.com/jordanhubbard/sheme.git ~/sheme
+          cd ~/sheme && make install
+
+      - name: Check sheme version
+        run: source ~/.bs.sh && bs-eval '"sheme ready"'
+
+      - name: "Test: start and quit"
+        run: expect tests/test_scm_start_quit.exp
+
+      - name: "Test: open file"
+        run: expect tests/test_scm_open_file.exp
+
+      - name: "Test: save file"
+        run: expect tests/test_scm_save_file.exp
+
+      - name: "Test: upcase word (M-u)"
+        run: expect tests/test_scm_upcase.exp
+
+      - name: "Test: isearch highlight"
+        run: expect tests/test_scm_isearch.exp
+
   test-macos:
     name: macOS Smoke Test
     runs-on: macos-latest

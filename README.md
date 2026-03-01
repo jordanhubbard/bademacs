@@ -73,6 +73,12 @@ loads `em.scm`, and calls `(em-main)`.
 
 ### Installing the Scheme backend
 
+`em.scm` requires **sheme v1.0.0 or later**.  It uses the terminal I/O
+builtins introduced in that release: `read-byte`, `write-stdout`,
+`terminal-raw!`, `terminal-restore!`, `terminal-size`, `terminal-suspend!`,
+`file-read`, `file-write-atomic`, `file-glob`, `file-directory?`,
+`eval-string`, and `shell-capture`.
+
 1. Install [sheme](https://github.com/jordanhubbard/sheme) (`bs.sh`):
 
    ```bash

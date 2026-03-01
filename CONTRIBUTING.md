@@ -5,6 +5,8 @@
 Open a GitHub issue. Include:
 - Your shell and version (`bash --version` or `zsh --version`)
 - OS and terminal emulator
+- Which implementation (`em.sh`, `em.zsh`, or `em.scm`) — for `em.scm`,
+  also include your sheme version (`source ~/.bs.sh && bs-eval '"version"'`)
 - Steps to reproduce
 - Expected vs actual behaviour
 
@@ -21,16 +23,27 @@ Open a GitHub issue. Include:
 - [ ] `make check` passes (syntax validation)
 - [ ] No regressions in existing keybindings
 - [ ] README updated if keybindings or install steps changed
+- [ ] If `em.scm` was changed: Scheme editor tests pass (see below)
 
 ## Running Tests
 
 ```bash
 make check          # syntax validation only (fast)
-make test           # full integration suite (requires expect)
+make test           # bash and zsh integration tests (requires expect)
+make test SCM=1     # also run Scheme editor tests (requires expect + sheme)
 ```
 
 Tests are driven by `expect` scripts under `tests/`. Each file exercises a
-specific editing operation across both the bash and zsh implementations.
+specific editing operation across the bash, zsh, and Scheme implementations.
+
+To run the Scheme editor tests locally, install sheme first:
+
+```bash
+git clone https://github.com/jordanhubbard/sheme.git ~/sheme
+cd ~/sheme && make install    # puts ~/.bs.sh in place
+cd /path/to/shemacs
+make test                     # run_tests.sh auto-detects sheme and includes scm tests
+```
 
 ## Commit Messages
 
@@ -53,6 +66,9 @@ chore: update CI to use actions/checkout@v4
 - Both files are sourced into the user's shell — keep the global namespace clean.
   All internal names are prefixed `_em_`.
 - No external dependencies beyond the standard POSIX utilities.
+- **Scheme version (`em.scm`)**: pure R5RS-compatible Scheme; no bash/zsh-specific
+  code. All I/O goes through sheme builtins. Requires sheme ≥ v1.0.0.
+  Keep in sync with `em.sh` for feature parity.
 
 ## Release Process
 
