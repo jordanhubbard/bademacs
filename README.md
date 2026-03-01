@@ -6,13 +6,17 @@ Linux/macOS install -- just bash (or zsh) and `/usr/bin`.
 
 Features include multiple buffers, undo, a 60-entry kill ring, incremental
 search, query replace, keyboard macros, region highlighting, fill paragraph,
-and universal argument -- all in ~2000 lines of pure shell script.
+and universal argument -- all in ~2750 lines of pure shell script.
 
-Both **bash** (`em.sh`) and **zsh** (`em.zsh`) versions are included.
+Three implementations are included:
+
+- **`em.sh`** — bash implementation (the original)
+- **`em.zsh`** — zsh implementation (zsh-native glob syntax for file completion)
+- **`em.scm`** — Scheme implementation, launched via `em.scm.sh`; requires [sheme](https://github.com/jordanhubbard/sheme)
 
 ## Install
 
-### Quick Setup (source from .bashrc)
+### Quick Setup (source from .bashrc / .zshrc)
 
 Clone the repo and use `make install`:
 
@@ -40,7 +44,7 @@ instantly -- there is no fork/exec overhead.
 ```bash
 make install           # copy em.sh/em.zsh to ~/ and add source lines to rc files
 make uninstall         # remove copied files and source lines
-make check             # syntax-check both versions
+make check             # syntax-check bash and zsh versions
 ```
 
 ### Standalone (no sourcing)
@@ -55,6 +59,37 @@ chmod +x em.sh
 
 In this mode it runs as a script in a subshell rather than a shell
 function, but the behavior is identical.
+
+## Scheme Implementation
+
+`em.scm` is the editor rewritten in ~1300 lines of pure Scheme. It is
+shell-neutral: all terminal I/O, key reading, and file operations go
+through [sheme](https://github.com/jordanhubbard/sheme)'s built-in
+primitives, so the Scheme source itself contains no bash- or zsh-specific
+code.
+
+`em.scm.sh` is the thin launcher that sources the sheme interpreter,
+loads `em.scm`, and calls `(em-main)`.
+
+### Installing the Scheme backend
+
+1. Install [sheme](https://github.com/jordanhubbard/sheme) (`bs.sh`):
+
+   ```bash
+   git clone https://github.com/jordanhubbard/sheme.git ~/sheme
+   cd ~/sheme && make install
+   ```
+
+2. Then run or source `em.scm.sh`:
+
+   ```bash
+   # Run standalone
+   bash em.scm.sh myfile.txt
+
+   # Or add to ~/.bashrc for instant startup as a shell function
+   source /path/to/shemacs/em.scm.sh
+   em myfile.txt
+   ```
 
 ## Keybindings
 

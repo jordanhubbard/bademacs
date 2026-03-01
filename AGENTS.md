@@ -3,19 +3,20 @@
 ## Project Summary
 
 `em` is a self-contained Emacs/mg-compatible text editor implemented as a
-**single shell function** (~2080 lines). It has zero dependencies beyond
-bash 4+ (or zsh 5+) and a POSIX `/usr/bin`. The editor ships in two
-versions — `em` for bash and `em.zsh` for zsh — and is designed to be
-sourced into a user's shell rc file so it starts instantly with no
-fork/exec overhead.
+**single shell function** (~2750 lines). It has zero dependencies beyond
+bash 4+ (or zsh 5+) and a POSIX `/usr/bin`. The editor ships in three
+versions and is designed to be sourced into a user's shell rc file so it
+starts instantly with no fork/exec overhead.
 
 License: BSD 2-Clause. Author: Jordan Hubbard.
 
 ## Repository Layout
 
 ```
-em              — The editor, bash version (single file defining the em() function)
-em.zsh          — The editor, zsh version (same functionality, zsh-native idioms)
+em.sh           — The editor, bash implementation (~2750 lines)
+em.zsh          — The editor, zsh implementation (~2750 lines, zsh-native idioms)
+em.scm          — The editor, Scheme implementation (~1300 lines of pure Scheme)
+em.scm.sh       — Launcher for the Scheme backend (sources sheme's bs.sh, loads em.scm)
 Makefile        — install/uninstall/check targets (auto-detects bash vs zsh)
 README.md       — User-facing documentation and keybinding reference
 LICENSE         — BSD 2-Clause
@@ -23,20 +24,56 @@ AGENTS.md       — This file (LLM-oriented project documentation)
 .github/        — Issue templates (bug_report.md, feature_request.md)
 ```
 
-There are **two source files**: `em` (bash) and `em.zsh` (zsh). They
-implement identical functionality. Everything else is project metadata.
+There are **three source files**: `em.sh` (bash), `em.zsh` (zsh), and
+`em.scm` (Scheme). Everything else is project metadata.
+
+**Feature parity rule**: Any feature added to one implementation must be
+propagated to all three.
+
+## The Three Implementations
+
+### 1. `em.sh` — Bash implementation (original)
+
+~2750 lines of pure bash. Requires bash 4+. Can be sourced into `~/.bashrc`
+to define the `em()` shell function, or run directly as a standalone script.
+
+### 2. `em.zsh` — Zsh implementation
+
+~2750 lines, functionally identical to `em.sh`. Uses zsh-specific glob
+syntax for file completion in the minibuffer (e.g. `*(N)` null-glob) and
+other zsh-native idioms. Can be sourced into `~/.zshrc` or run standalone.
+
+### 3. `em.scm` + `em.scm.sh` — Scheme implementation
+
+`em.scm` is ~1300 lines of pure Scheme. It is **shell-neutral**: all
+terminal I/O, file I/O, and key reading are handled through sheme's
+built-in primitives (`read-byte`, `write-stdout`, `terminal-raw!`, etc.).
+The Scheme source itself contains no shell-specific code.
+
+`em.scm.sh` is the thin launcher (~30 lines of shell). It:
+1. Sources `bs.sh` from the sheme interpreter installation
+2. Loads `em.scm` into the interpreter
+3. Calls `(em-main)` to start the editor
+
+`em.scm.sh` can be run as a standalone script (`bash em.scm.sh file.txt`)
+or sourced into a shell rc file to define the `em()` function for instant
+startup.
+
+**Dependency**: `em.scm` requires [sheme](https://github.com/jordanhubbard/sheme)
+(`bs.sh`) to be installed. Install sheme first, then use `make install` to
+set up the shemacs Scheme backend.
 
 ## Architecture
 
-### Single-Function Design
+### Single-Function Design (bash/zsh versions)
 
-The editor is a single bash function `em()` (line 35). All state is held in
+The editor is a single bash/zsh function `em()`. All state is held in
 `local` variables and all sub-routines are inner functions (nested
-`_em_*()` definitions). On exit, `_em_cleanup` unsets every `_em_*` function
-and restores terminal state. This means the editor leaves no persistent
-shell pollution after quitting.
+`_em_*()` definitions). On exit, `_em_cleanup` unsets every `_em_*`
+function and restores terminal state. This means the editor leaves no
+persistent shell pollution after quitting.
 
-### State Model
+### State Model (bash/zsh versions)
 
 All editor state is local to `em()`:
 
@@ -199,28 +236,41 @@ Delimiter constants for serialization:
 ## Keybindings
 
 The editor aims for mg/emacs compatibility. All bindings are documented in
-the header comment of `em` (lines 6–33) and in `README.md`. The dispatch
+the header comment of `em.sh` (lines 6–33) and in `README.md`. The dispatch
 table is in `_em_dispatch` (line ~2011) and `_em_read_cx_key` (line ~1983).
 
 ## Building and Testing
 
 ```bash
-make check                       # syntax-check both bash and zsh versions
+make check                       # syntax-check bash and zsh versions
 make install                     # auto-detect shell, install to correct rc file
 make install SHELL_TYPE=zsh      # force zsh install to ~/.zshrc
 make uninstall                   # remove source line from rc file
 ```
 
-The editor can also be run standalone: `chmod +x em && ./em file.txt`
+The bash and zsh versions can also be run standalone:
+```bash
+chmod +x em.sh
+./em.sh file.txt
+```
+
+The Scheme version requires sheme to be installed:
+```bash
+# Install sheme first (see https://github.com/jordanhubbard/sheme)
+bash em.scm.sh file.txt          # run standalone
+# or source em.scm.sh in your rc file for the em() function
+```
 
 ## Common Modification Patterns
 
 **Adding a new keybinding**: Add a case to `_em_dispatch` (or `_em_read_cx_key`
 for C-x prefix bindings). Write the handler as a new `_em_*` function.
 Remember to push undo records for any buffer mutations.
+Propagate the binding to `em.zsh` and `em.scm`.
 
 **Adding an M-x command**: Add a case to the `case` block in
 `_em_execute_extended`.
+Propagate to `em.zsh` and to `em.scm`'s command dispatch.
 
 **Adding a new undo type**: Add a case to `_em_undo` and call
 `_em_undo_push` with the new type name from the mutation function. Existing
@@ -237,14 +287,15 @@ implement identical functionality and share the same architecture.
 
 ### Differences from the bash version
 
-| Area | Bash (`em`) | Zsh (`em.zsh`) |
-|------|-------------|----------------|
+| Area | Bash (`em.sh`) | Zsh (`em.zsh`) |
+|------|----------------|----------------|
 | Option scoping | Manual errexit save/restore | `emulate -L zsh` + `setopt KSH_ARRAYS` |
 | Array indexing | Native 0-based | 0-based via `KSH_ARRAYS` |
 | Single-char read | `read -rsn1 -d ''` | `read -rk1` |
 | Case conversion | `${ch^}` / `${ch,}` / `${ch^^}` / `${ch,,}` | `${(U)ch}` / `${(L)ch}` |
 | Function cleanup | `declare -F` + process substitution | `${(k)functions}` iteration |
 | Last-element access | `${arr[-1]}` / `unset 'arr[-1]'` | `${arr[${#arr[@]}-1]}` / array slice |
+| File completion | Standard glob | zsh glob syntax (`*(N)` null-glob) |
 
 ### Why `KSH_ARRAYS`?
 
@@ -255,13 +306,55 @@ math unchanged. This is scoped to the function via `emulate -L zsh`.
 
 ### Keeping the versions in sync
 
-When modifying editor logic, **apply the same change to both `em` and
-`em.zsh`**. The only lines that differ are the ones listed in the table
-above. A `diff em em.zsh` should show only ~25 changed lines.
+When modifying editor logic, **apply the same change to `em.sh`, `em.zsh`,
+and `em.scm`**. The shell-specific lines that differ between `em.sh` and
+`em.zsh` are listed in the table above. A `diff em.sh em.zsh` should show
+only ~25 changed lines.
+
+## Scheme Version (`em.scm`)
+
+`em.scm` is the Scheme implementation of the editor. It is shell-neutral:
+it uses only sheme's built-in primitives for all I/O, and contains no
+bash- or zsh-specific code.
+
+### Dependencies
+
+- **sheme** (`bs.sh`) must be installed. See
+  [github.com/jordanhubbard/sheme](https://github.com/jordanhubbard/sheme).
+- bash 4+ is required to run `em.scm.sh` (the launcher). The Scheme source
+  itself is shell-neutral once inside the interpreter.
+
+### How `em.scm.sh` works
+
+`em.scm.sh` is the launcher. It can be used in two ways:
+
+1. **Standalone**: `bash em.scm.sh [file]` — sources `bs.sh`, loads `em.scm`,
+   calls `(em-main [file])`, then exits.
+2. **Sourced**: `source em.scm.sh` — defines an `em()` shell function that
+   runs the editor inside the current shell process for zero-startup overhead.
+
+### Architecture diagram
+
+```
+┌──────────────────────────────────────────┐
+│  em.scm (~1300 lines of pure Scheme)     │
+│  Buffer ops, renderer, key reader,       │
+│  kill ring, undo stack, file I/O, search │
+├──────────────────────────────────────────┤
+│  bs.sh — sheme interpreter (bash)        │
+│  Builtins: read-byte, write-stdout,      │
+│  terminal-raw!, terminal-size, file-read,│
+│  file-write, eval-string                 │
+├──────────────────────────────────────────┤
+│  em.scm.sh — thin launcher (~30 lines)  │
+│  Sources bs.sh, loads em.scm,            │
+│  calls (em-main)                         │
+└──────────────────────────────────────────┘
+```
 
 ## Gotchas
 
-- Arrays are 0-indexed in both versions (zsh uses `KSH_ARRAYS`), but
+- Arrays are 0-indexed in both shell versions (zsh uses `KSH_ARRAYS`), but
   line numbers displayed to the user are 1-indexed.
 - `_em_lines` always has at least one element (empty string for empty buffer).
 - The undo stack auto-trims at 200 entries (drops oldest 100).
@@ -273,3 +366,6 @@ above. A `diff em em.zsh` should show only ~25 changed lines.
   data structures.
 - In the zsh version, avoid `${arr[-1]}` for last-element access — use
   `${arr[${#arr[@]}-1]}` for KSH_ARRAYS compatibility.
+- The Scheme version (`em.scm`) will not run without sheme installed. Check
+  that `bs.sh` is on the path or in the expected install location before
+  troubleshooting `em.scm.sh`.
