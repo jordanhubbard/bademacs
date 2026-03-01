@@ -10,6 +10,10 @@ jobs:
   syntax-check:
     name: Syntax Check
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+
     steps:
       - uses: actions/checkout@v4
 
@@ -32,6 +36,10 @@ jobs:
     name: Bash Integration Tests
     runs-on: ubuntu-latest
     needs: syntax-check
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
     steps:
       - uses: actions/checkout@v4
 
@@ -66,6 +74,10 @@ jobs:
     name: Zsh Integration Tests
     runs-on: ubuntu-latest
     needs: syntax-check
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
     steps:
       - uses: actions/checkout@v4
 
@@ -100,6 +112,10 @@ jobs:
     name: macOS Smoke Test
     runs-on: macos-latest
     needs: syntax-check
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
     steps:
       - uses: actions/checkout@v4
 

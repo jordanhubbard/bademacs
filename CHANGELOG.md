@@ -1,36 +1,31 @@
 # Changelog
 
-## v1.0.0 — 2026-02-28
+All notable changes to shemacs are documented here.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-- Initial commit (63a6cad)
-- Initial plan (b014e91)
-- Add bademacs shell script - lightweight emacs-like editor in bash (a4ecd4f)
-- Merge pull request #1 from jordanhubbard/copilot/add-light-weight-editor (6bb965f)
-- Rewrite bademacs as a sourceable shell function with full mg keybinding support (bcc86da)
-- Expand README install section with step-by-step .bashrc sourcing instructions (e404f86)
-- Fix terminal handling, Enter key, and file I/O robustness (30956fa)
-- Update issue templates (4e592ba)
-- Fix project name formatting in README (7a5d9b5)
-- Replace bademacs with em: complete rewrite with undo, multiple buffers, macros (1152d04)
-- Fix rendering corruption and C-x C-c killing the shell (2e63e16)
-- Fix C-v pagination, C-x C-c terminal corruption, and C-SPC mark (6ff6541)
-- Fix C-v being eaten by tty lnext character (3f7258e)
-- Fix ESC as Meta prefix, harden terminal cleanup, rename to bad emacs (b370968)
-- Fix ESC key handling, add missing undo/M-x, code review fixes (e3a8d0e)
-- Fix 8 bugs found during expert bash code review (9606bed)
-- Simplify install: source directly from repo, no copy (d4a6453)
-- Fix Return key, minibuffer input, and terminal cleanup (8517edf)
-- Undefine intr/quit/susp so Ctrl-C reaches read on macOS (c2871f4)
-- Add zsh-native version and auto-detect shell on install (dfd7785)
-- Fix zsh-specific issues found during testing (c552eb8)
-- Add CI/CD pipeline and fix printf status line bug (6748018)
-- Implement issue #2 feature requests: isearch highlight, tab completion, clipboard, rectangles, flicker fix (a3a9418)
-- Implement issues 8, 10, 11, 12, 13 from forthrin feedback (903adf2)
-- Add skills for responsible vibe coding (a75a369)
-- Improve large file performance (fixes #5) (faa7cbf)
-- Rename em → em.sh, copy-based install, update docs (b88d36a)
-- ci: install zsh in syntax-check job (4eeabd1)
-- Address forthrin feedback: version guard, standalone mode, horizontal scroll, stdin pipe, mark-preserving indent (1d9576b)
-- ci: install bash 5 via Homebrew for macOS smoke tests (b8b3944)
-- Auto-find bash 4+ on system; use standalone mode in tests (ef65298)
-- Add make release target for automated versioning and GitHub releases (e2a3355)
+## [Unreleased]
+
+## [1.0.0] - 2026-02-28
+
+### Added
+- Emacs-like editor (`em`) as a sourceable shell function for bash and zsh
+- Multiple buffer support, undo history, and keyboard macros
+- Isearch with highlight, tab completion, clipboard integration, and rectangle
+  operations
+- Zsh-native implementation (`em.zsh`) with full keybinding parity
+- Scheme backend (`em.scm`) powered by sheme for extended scripting
+- Horizontal scrolling, standalone mode, and stdin pipe support
+- Mark-preserving indent and bash 4+/5+ version guard
+- CI/CD pipeline with GitHub Actions (Ubuntu and macOS matrix)
+- Integration test suite using `expect` (bash and zsh)
+- `make release` target for automated versioning and GitHub releases
+
+### Fixed
+- Terminal handling, Enter key, and file I/O robustness
+- C-x C-c terminal corruption on exit
+- C-v pagination and lnext-character interception
+- ESC as Meta prefix and terminal cleanup on exit
+- Return key, minibuffer input, and rendering corruption
+- Ctrl-C handling on macOS (undefine intr/quit/susp)
+- Large file performance (#5)
+- Printf status-line rendering artifact in CI

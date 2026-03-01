@@ -2,10 +2,12 @@
 # scripts/release.sh — Automated release for shemacs
 # Usage: bash scripts/release.sh [patch|minor|major]
 # Called by: make release [BUMP=patch|minor|major]
+# Batch mode: BATCH=yes make release [BUMP=...]
 
 set -euo pipefail
 
 BUMP="${1:-patch}"
+BATCH_MODE="${BATCH:-no}"
 DATE=$(date +%Y-%m-%d)
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -13,6 +15,11 @@ cd "$REPO_ROOT"
 # ── Preflight checks ─────────────────────────────────────────────────
 if ! command -v gh &>/dev/null; then
     echo "Error: gh CLI is required. Install from https://cli.github.com" >&2
+    exit 1
+fi
+
+if ! gh auth status &>/dev/null; then
+    echo "Error: gh CLI is not authenticated. Run: gh auth login" >&2
     exit 1
 fi
 
@@ -28,28 +35,38 @@ if [[ -n "$(git status --porcelain)" ]]; then
     exit 1
 fi
 
+# Enforce main branch
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [[ "$CURRENT_BRANCH" != "main" ]]; then
+    if [[ "$BATCH_MODE" == "yes" ]]; then
+        echo "Error: not on main branch (on: $CURRENT_BRANCH). Aborting in batch mode." >&2
+        exit 1
+    fi
+    echo "Warning: not on main branch (currently on: $CURRENT_BRANCH)"
+    read -r -p "Continue anyway? (y/n) " REPLY
+    [[ "$REPLY" =~ ^[Yy]$ ]] || exit 0
+fi
+
 # ── Determine versions ───────────────────────────────────────────────
 LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
 
 if [[ -z "$LAST_TAG" ]]; then
-    # First release ever
-    NEW_VERSION="v1.0.0"
+    NEW_TAG="v1.0.0"
+    NEW_VER="1.0.0"
     COMMIT_RANGE=""
-    echo "First release: $NEW_VERSION"
+    echo "First release: $NEW_TAG"
 else
-    # Parse current version
     VER="${LAST_TAG#v}"
     IFS='.' read -r MAJOR MINOR PATCH <<< "$VER"
-
     case "$BUMP" in
         major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
         minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
         patch) PATCH=$((PATCH + 1)) ;;
     esac
-
-    NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+    NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
+    NEW_VER="${MAJOR}.${MINOR}.${PATCH}"
     COMMIT_RANGE="${LAST_TAG}..HEAD"
-    echo "Bumping $LAST_TAG -> $NEW_VERSION ($BUMP)"
+    echo "Bumping $LAST_TAG -> $NEW_TAG ($BUMP)"
 fi
 
 # ── Check for new commits ────────────────────────────────────────────
@@ -63,35 +80,48 @@ if (( COMMIT_COUNT == 0 )); then
     echo "Error: no new commits since $LAST_TAG. Nothing to release." >&2
     exit 1
 fi
-
 echo "  $COMMIT_COUNT commit(s) to include"
 
-# ── Generate CHANGELOG entry ─────────────────────────────────────────
+# ── Generate CHANGELOG entry (Keep a Changelog format) ───────────────
 if [[ -n "$COMMIT_RANGE" ]]; then
-    LOG=$(git log "$COMMIT_RANGE" --pretty=format:"- %s (%h)" --reverse)
+    COMMITS=$(git log "$COMMIT_RANGE" --pretty=format:"%h %s" --no-merges --reverse)
 else
-    LOG=$(git log --pretty=format:"- %s (%h)" --reverse)
+    COMMITS=$(git log --pretty=format:"%h %s" --no-merges --reverse)
 fi
 
-ENTRY="## $NEW_VERSION — $DATE
+added=""; fixed=""; changed=""; other=""
+while IFS= read -r line; do
+    msg=$(echo "$line" | cut -d' ' -f2-)
+    if   [[ "$line" =~ ^[a-f0-9]+\ feat(\([^)]*\))?:\ (.*) ]];    then added+="- ${BASH_REMATCH[2]}"$'\n'
+    elif [[ "$line" =~ ^[a-f0-9]+\ fix(\([^)]*\))?:\ (.*) ]];     then fixed+="- ${BASH_REMATCH[2]}"$'\n'
+    elif [[ "$line" =~ ^[a-f0-9]+\ refactor(\([^)]*\))?:\ (.*) ]]; then changed+="- ${BASH_REMATCH[2]}"$'\n'
+    elif [[ "$line" =~ ^[a-f0-9]+\ (chore|docs|ci)(\([^)]*\))?:\ (.*) ]]; then : # skip housekeeping
+    else other+="- $msg"$'\n'
+    fi
+done <<< "$COMMITS"
 
-$LOG"
+ENTRY="## [$NEW_VER] - $DATE"$'\n'
+[[ -n "$added"   ]] && ENTRY+=$'\n'"### Added"$'\n'"$added"
+[[ -n "$changed" ]] && ENTRY+=$'\n'"### Changed"$'\n'"$changed"
+[[ -n "$fixed"   ]] && ENTRY+=$'\n'"### Fixed"$'\n'"$fixed"
+[[ -n "$other"   ]] && ENTRY+=$'\n'"### Other"$'\n'"$other"
 
+# ── Update CHANGELOG.md ──────────────────────────────────────────────
 if [[ -f CHANGELOG.md ]]; then
-    # Prepend new entry after the first line (header)
-    EXISTING=$(cat CHANGELOG.md)
-    HEADER=$(head -1 CHANGELOG.md)
-    REST=$(tail -n +2 CHANGELOG.md)
-    printf '%s\n\n%s\n%s\n' "$HEADER" "$ENTRY" "$REST" > CHANGELOG.md
+    # Insert new entry after the ## [Unreleased] section header
+    awk -v entry="$ENTRY" '
+        /^## \[Unreleased\]/ { print; print ""; print entry; next }
+        { print }
+    ' CHANGELOG.md > CHANGELOG.md.tmp
+    mv CHANGELOG.md.tmp CHANGELOG.md
 else
-    printf '# Changelog\n\n%s\n' "$ENTRY" > CHANGELOG.md
+    printf '# Changelog\n\nAll notable changes are documented here.\nFormat follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).\n\n## [Unreleased]\n\n%s\n' "$ENTRY" > CHANGELOG.md
 fi
-
 echo "  Updated CHANGELOG.md"
 
 # ── Commit CHANGELOG ─────────────────────────────────────────────────
 git add CHANGELOG.md
-git commit -m "Update CHANGELOG for $NEW_VERSION"
+git commit -m "docs: update CHANGELOG for $NEW_TAG"
 echo "  Committed CHANGELOG"
 
 # ── Run tests ────────────────────────────────────────────────────────
@@ -103,7 +133,6 @@ if ! make test; then
     echo "The CHANGELOG commit remains — fix tests and re-run make release." >&2
     exit 1
 fi
-echo ""
 echo "  All tests passed"
 
 # ── Verify clean tree ────────────────────────────────────────────────
@@ -113,22 +142,23 @@ if [[ -n "$(git status --porcelain)" ]]; then
     exit 1
 fi
 
-# ── Push commits ─────────────────────────────────────────────────────
+# ── Push, tag, and release ───────────────────────────────────────────
+REPO_URL=$(gh repo view --json url -q .url 2>/dev/null || echo "")
+
 echo "  Pushing commits..."
 git push
 
-# ── Tag and push tag ─────────────────────────────────────────────────
-git tag -a "$NEW_VERSION" -m "Release $NEW_VERSION"
-git push origin "$NEW_VERSION"
-echo "  Tagged $NEW_VERSION"
+git tag -a "$NEW_TAG" -m "Release $NEW_TAG"
+git push origin "$NEW_TAG"
+echo "  Tagged $NEW_TAG"
 
-# ── Create GitHub release ────────────────────────────────────────────
-# Use the changelog entry as release notes
 NOTES="$ENTRY"
+[[ -n "$REPO_URL" && -n "$LAST_TAG" ]] && \
+    NOTES+=$'\n\n'"**Full Changelog**: ${REPO_URL}/compare/${LAST_TAG}...${NEW_TAG}"
 
-gh release create "$NEW_VERSION" \
-    --title "$NEW_VERSION" \
+gh release create "$NEW_TAG" \
+    --title "$NEW_TAG" \
     --notes "$NOTES"
 
 echo ""
-echo "Released $NEW_VERSION"
+echo "Released $NEW_TAG"
