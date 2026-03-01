@@ -9,7 +9,7 @@ expect {
     timeout { puts "\nFAIL: editor did not start"; exit 1 }
 }
 
-set timeout 30 ; # operations after startup are fast
+set timeout 120 ; # Scheme editor is slow on CI (~2s/keystroke), 15+5 chars = ~40s
 
 # Type some text
 send "hello world foo"
