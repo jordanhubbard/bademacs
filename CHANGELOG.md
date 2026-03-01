@@ -9,6 +9,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 - correct bash regex patterns in changelog categorizer
+- correct ((PASS++)) arithmetic under set -e, skip expect when absent
+
+### Other
+- Rename bad-emacs → shemacs
+- Address issue #2 feedback: dsusp, rect r/d, minibuffer display, help trim
+- Move Scheme editor into shemacs; add em.scm.sh launcher
+- Bring em.scm to feature parity with em.sh; update docs for 3 implementations
+
+
+## [1.0.1] - 2026-03-01
+
+### Fixed
+- correct bash regex patterns in changelog categorizer
 
 ### Other
 - Rename bad-emacs → shemacs
