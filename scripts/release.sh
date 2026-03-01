@@ -89,13 +89,21 @@ else
     COMMITS=$(git log --pretty=format:"%h %s" --no-merges --reverse)
 fi
 
+# Regex patterns assigned to variables — bash [[ =~ ]] handles complex
+# patterns reliably when they come from a variable rather than a literal.
+re_feat='^[a-f0-9]+ feat'
+re_fix='^[a-f0-9]+ fix'
+re_refactor='^[a-f0-9]+ refactor'
+re_skip='^[a-f0-9]+ (chore|docs|ci)'
+
 added=""; fixed=""; changed=""; other=""
 while IFS= read -r line; do
     msg=$(echo "$line" | cut -d' ' -f2-)
-    if   [[ "$line" =~ ^[a-f0-9]+\ feat(\([^)]*\))?:\ (.*) ]];    then added+="- ${BASH_REMATCH[2]}"$'\n'
-    elif [[ "$line" =~ ^[a-f0-9]+\ fix(\([^)]*\))?:\ (.*) ]];     then fixed+="- ${BASH_REMATCH[2]}"$'\n'
-    elif [[ "$line" =~ ^[a-f0-9]+\ refactor(\([^)]*\))?:\ (.*) ]]; then changed+="- ${BASH_REMATCH[2]}"$'\n'
-    elif [[ "$line" =~ ^[a-f0-9]+\ (chore|docs|ci)(\([^)]*\))?:\ (.*) ]]; then : # skip housekeeping
+    clean=$(echo "$msg" | sed 's/^[^:]*: //')   # strip "type: " prefix
+    if   [[ "$line" =~ $re_feat ]];     then added+="- $clean"$'\n'
+    elif [[ "$line" =~ $re_fix ]];      then fixed+="- $clean"$'\n'
+    elif [[ "$line" =~ $re_refactor ]]; then changed+="- $clean"$'\n'
+    elif [[ "$line" =~ $re_skip ]];     then : # skip housekeeping commits
     else other+="- $msg"$'\n'
     fi
 done <<< "$COMMITS"
