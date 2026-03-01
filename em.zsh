@@ -121,7 +121,8 @@ em() {
         stty "$_em_stty_saved" 2>/dev/null || stty sane 2>/dev/null
         kill -TSTP $$
         # Resumed (SIGCONT received) — reinitialize terminal
-        stty raw -echo -isig -ixon -ixoff -icrnl intr undef quit undef susp undef dsusp undef lnext undef 2>/dev/null
+        stty raw -echo -isig -ixon -ixoff -icrnl intr undef quit undef susp undef lnext undef 2>/dev/null
+        stty dsusp undef 2>/dev/null || true   # macOS only; ignore on Linux
         printf '%s' "${ESC}[?1049h${ESC}[?25l"
         _em_handle_resize
         _em_message="Resumed"
@@ -165,7 +166,8 @@ em() {
         fi
 
         # Now enter raw mode and alternate screen
-        stty raw -echo -isig -ixon -ixoff -icrnl intr undef quit undef susp undef dsusp undef lnext undef 2>/dev/null
+        stty raw -echo -isig -ixon -ixoff -icrnl intr undef quit undef susp undef lnext undef 2>/dev/null
+        stty dsusp undef 2>/dev/null || true   # macOS only; ignore on Linux
         # No EXIT trap — dangerous for shell functions (lingers after return)
         trap '_em_cleanup; return 130' INT
         trap '_em_cleanup; return 143' TERM
