@@ -1,7 +1,8 @@
 SHELL := /bin/bash
 SRCDIR := $(abspath .)
+BUMP ?= patch
 
-.PHONY: install uninstall check test
+.PHONY: install uninstall check test release
 
 install:
 	@echo "Installing bad-emacs to home directory..."
@@ -40,3 +41,6 @@ check:
 
 test: check
 	@./tests/run_tests.sh
+
+release:
+	@bash scripts/release.sh $(BUMP)
