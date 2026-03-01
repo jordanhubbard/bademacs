@@ -1,6 +1,6 @@
 #!/usr/bin/expect -f
 # Test: Type text in Scheme editor, save to file, verify content, quit
-set timeout 120
+set timeout 300 ; # Scheme startup (bs loads ~1300 lines) is slow on CI
 
 set testfile "/tmp/em_scm_test_save_output.txt"
 file delete -force $testfile
@@ -11,6 +11,8 @@ expect {
     "shemacs" { puts "\nPASS: editor started" }
     timeout { puts "\nFAIL: editor did not start"; exit 1 }
 }
+
+set timeout 30 ; # operations after startup are fast
 
 # Type text
 send "Hello from scheme em"

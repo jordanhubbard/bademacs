@@ -1,6 +1,6 @@
 #!/usr/bin/expect -f
 # Test: I-search highlights match in Scheme editor
-set timeout 120
+set timeout 300 ; # Scheme startup (bs loads ~1300 lines) is slow on CI
 
 spawn bash [file join [file dirname [info script]] .. em.scm.sh]
 
@@ -8,6 +8,8 @@ expect {
     "shemacs" { puts "\nPASS: editor started" }
     timeout { puts "\nFAIL: editor did not start"; exit 1 }
 }
+
+set timeout 30 ; # operations after startup are fast
 
 # Type some text
 send "hello world foo"
