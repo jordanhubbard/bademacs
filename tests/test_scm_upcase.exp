@@ -1,0 +1,40 @@
+#!/usr/bin/expect -f
+# Test: Type text in Scheme editor, upcase word with M-u, quit
+set timeout 120
+
+spawn bash [file join [file dirname [info script]] .. em.scm.sh]
+
+expect {
+    "shemacs" { puts "\nPASS: editor started" }
+    timeout { puts "\nFAIL: editor did not start"; exit 1 }
+}
+
+# Type text
+send "hello"
+sleep 2
+
+# C-a to go to beginning of line
+send "\x01"
+sleep 1
+
+# M-u (ESC then u) to upcase word
+send "\x1b"
+sleep 0.3
+send "u"
+sleep 2
+
+expect {
+    "HELLO" { puts "PASS: upcase word worked" }
+    timeout { puts "FAIL: upcase not visible"; exit 1 }
+}
+
+# C-x C-c to quit (buffer is modified, decline save)
+send "\x18\x03"
+sleep 1
+
+expect {
+    eof { puts "PASS: editor exited cleanly" }
+    timeout { puts "FAIL: editor did not exit"; exit 1 }
+}
+
+puts "TEST PASSED: scheme upcase word"

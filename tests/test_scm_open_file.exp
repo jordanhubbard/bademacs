@@ -1,0 +1,32 @@
+#!/usr/bin/expect -f
+# Test: Open a file in Scheme editor, verify content renders, quit
+set timeout 120
+
+# Create test file
+set fd [open "/tmp/em_scm_test_input.txt" w]
+puts $fd "Hello World"
+puts $fd "Second Line"
+puts $fd "Third Line"
+close $fd
+
+spawn bash [file join [file dirname [info script]] .. em.scm.sh] /tmp/em_scm_test_input.txt
+
+expect {
+    "Hello World" { puts "\nPASS: file content rendered" }
+    timeout { puts "\nFAIL: file content not shown"; exit 1 }
+}
+
+expect {
+    "em_scm_test_input.txt" { puts "PASS: filename in status line" }
+    timeout { puts "FAIL: filename not in status line"; exit 1 }
+}
+
+# C-x C-c to quit
+send "\x18\x03"
+
+expect {
+    eof { puts "PASS: editor exited cleanly" }
+    timeout { puts "FAIL: editor did not exit"; exit 1 }
+}
+
+puts "TEST PASSED: scheme open file"

@@ -1,0 +1,20 @@
+#!/usr/bin/expect -f
+# Test: Open scratch buffer in Scheme editor and quit
+set timeout 120
+
+spawn bash [file join [file dirname [info script]] .. em.scm.sh]
+
+expect {
+    "shemacs" { puts "\nPASS: editor started" }
+    timeout { puts "\nFAIL: editor did not start"; exit 1 }
+}
+
+# C-x C-c to quit
+send "\x18\x03"
+
+expect {
+    eof { puts "PASS: editor exited cleanly" }
+    timeout { puts "FAIL: editor did not exit"; exit 1 }
+}
+
+puts "TEST PASSED: scheme start and quit"

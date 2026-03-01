@@ -2,7 +2,7 @@ SHELL := /bin/bash
 SRCDIR := $(abspath .)
 BUMP ?= patch
 
-.PHONY: install uninstall check test release
+.PHONY: install install-scm uninstall uninstall-scm check test release
 
 install:
 	@echo "Installing shemacs to home directory..."
@@ -27,17 +27,43 @@ install:
 	fi
 	@echo "Installed. Open a new shell or source your rc file."
 
+install-scm: install
+	@echo ""
+	@echo "Installing Scheme-powered em (requires sheme: https://github.com/jordanhubbard/sheme)..."
+	@cp "$(SRCDIR)/em.scm.sh" "$(HOME)/.em.scm.sh"
+	@cp "$(SRCDIR)/em.scm" "$(HOME)/.em.scm"
+	@echo "Installed ~/.em.scm.sh and ~/.em.scm"
+	@if ! grep -q 'source.*\.em\.scm\.sh' "$(HOME)/.bashrc" 2>/dev/null; then \
+		echo '' >> "$(HOME)/.bashrc"; \
+		echo '# em - shemacs Scheme backend (requires sheme)' >> "$(HOME)/.bashrc"; \
+		echo 'source "$(HOME)/.em.scm.sh"' >> "$(HOME)/.bashrc"; \
+		echo "Added source line to ~/.bashrc"; \
+	else \
+		echo "~/.bashrc already sources ~/.em.scm.sh"; \
+	fi
+	@echo "Source ~/.em.scm.sh (instead of ~/.em.sh) to use the Scheme backend."
+
 uninstall:
 	@rm -f "$(HOME)/.em.sh" "$(HOME)/.em.zsh"
-	@[ -f "$(HOME)/.bashrc" ] && sed -i '' '/# em - bad emacs/d; /# em - shemacs/d; /source.*\.em\.\(sh\|zsh\)/d' "$(HOME)/.bashrc" || true
-	@[ -f "$(HOME)/.zshrc" ] && sed -i '' '/# em - bad emacs/d; /# em - shemacs/d; /source.*\.em\.\(sh\|zsh\)/d' "$(HOME)/.zshrc" || true
+	@[ -f "$(HOME)/.bashrc" ] && sed -i '' '/# em - bad emacs/d; /# em - shemacs/d; /source.*\.em\.\(sh\|zsh\)/d' "$(HOME)/.bashrc" 2>/dev/null || \
+		sed -i '/# em - bad emacs/d; /# em - shemacs/d; /source.*\.em\.\(sh\|zsh\)/d' "$(HOME)/.bashrc" 2>/dev/null || true
+	@[ -f "$(HOME)/.zshrc" ] && sed -i '' '/# em - bad emacs/d; /# em - shemacs/d; /source.*\.em\.\(sh\|zsh\)/d' "$(HOME)/.zshrc" 2>/dev/null || \
+		sed -i '/# em - bad emacs/d; /# em - shemacs/d; /source.*\.em\.\(sh\|zsh\)/d' "$(HOME)/.zshrc" 2>/dev/null || true
 	@echo "Uninstalled shemacs."
+
+uninstall-scm:
+	@rm -f "$(HOME)/.em.scm.sh" "$(HOME)/.em.scm"
+	@[ -f "$(HOME)/.bashrc" ] && sed -i '' '/# em - shemacs Scheme/d; /source.*\.em\.scm\.sh/d' "$(HOME)/.bashrc" 2>/dev/null || \
+		sed -i '/# em - shemacs Scheme/d; /source.*\.em\.scm\.sh/d' "$(HOME)/.bashrc" 2>/dev/null || true
+	@echo "Uninstalled Scheme-backed em."
 
 check:
 	@echo "Checking bash version..."
-	@bash -n em.sh && echo "  em.sh: Syntax OK"
+	@bash -n em.sh && echo "  em.sh:      Syntax OK"
 	@echo "Checking zsh version..."
-	@zsh -n em.zsh && echo "  em.zsh: Syntax OK"
+	@zsh -n em.zsh && echo "  em.zsh:     Syntax OK"
+	@echo "Checking Scheme launcher..."
+	@bash -n em.scm.sh && echo "  em.scm.sh:  Syntax OK"
 
 test: check
 	@./tests/run_tests.sh

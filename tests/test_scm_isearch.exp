@@ -1,0 +1,48 @@
+#!/usr/bin/expect -f
+# Test: I-search highlights match in Scheme editor
+set timeout 120
+
+spawn bash [file join [file dirname [info script]] .. em.scm.sh]
+
+expect {
+    "shemacs" { puts "\nPASS: editor started" }
+    timeout { puts "\nFAIL: editor did not start"; exit 1 }
+}
+
+# Type some text
+send "hello world foo"
+sleep 2
+
+# C-s to start isearch
+send "\x13"
+sleep 1
+
+expect {
+    "I-search:" { puts "PASS: isearch prompt appeared" }
+    timeout { puts "FAIL: isearch prompt not visible"; exit 1 }
+}
+
+# Type search term
+send "world"
+sleep 2
+
+# Check that reverse video (bold+reverse = ESC[1;7m) appears for the match
+expect {
+    -re "\x1b\\[1;7m" { puts "PASS: match highlighting visible" }
+    timeout { puts "FAIL: no match highlighting"; exit 1 }
+}
+
+# C-g to cancel search
+send "\x07"
+sleep 1
+
+# C-x C-c to quit
+send "\x18\x03"
+sleep 1
+
+expect {
+    eof { puts "PASS: exited" }
+    timeout { puts "FAIL: did not exit"; exit 1 }
+}
+
+puts "TEST PASSED: scheme isearch highlight"
