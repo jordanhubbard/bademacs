@@ -19,11 +19,11 @@ run_test() {
     printf "  %-40s " "$name"
     if output=$(expect "$script" 2>&1); then
         echo "PASS"
-        ((PASS++))
+        PASS=$((PASS + 1))
     else
         echo "FAIL"
         ERRORS+=("$name: $output")
-        ((FAIL++))
+        FAIL=$((FAIL + 1))
     fi
 }
 
@@ -35,32 +35,40 @@ echo "Syntax checks:"
 printf "  %-40s " "bash syntax (bash -n em.sh)"
 if bash -n em.sh 2>&1; then
     echo "PASS"
-    ((PASS++))
+    PASS=$((PASS + 1))
 else
     echo "FAIL"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
 fi
 
 if command -v zsh >/dev/null 2>&1; then
     printf "  %-40s " "zsh syntax (zsh -n em.zsh)"
     if zsh -n em.zsh 2>&1; then
         echo "PASS"
-        ((PASS++))
+        PASS=$((PASS + 1))
     else
         echo "FAIL"
-        ((FAIL++))
+        FAIL=$((FAIL + 1))
     fi
 fi
 printf "  %-40s " "bash syntax (bash -n em.scm.sh)"
 if bash -n em.scm.sh 2>&1; then
     echo "PASS"
-    ((PASS++))
+    PASS=$((PASS + 1))
 else
     echo "FAIL"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
 fi
 
 echo ""
+
+# Check if expect is available for interactive tests
+if ! command -v expect >/dev/null 2>&1; then
+    echo "Interactive tests: SKIPPED (expect not installed)"
+    echo ""
+    echo "=== Results: $PASS passed, $FAIL failed ==="
+    exit $((FAIL > 0 ? 1 : 0))
+fi
 
 # Bash tests
 if [[ "$FILTER" == "all" || "$FILTER" == "bash" ]]; then
