@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-03-01
+
+### Fixed
+- increase Scheme editor test timeouts for CI
+- raise Scheme test timeouts for slow CI keystroke processing
+
+
 ## [1.0.2] - 2026-03-01
 
 ### Fixed
