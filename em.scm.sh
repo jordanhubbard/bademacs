@@ -25,12 +25,48 @@ if [[ "${BASH_VERSINFO:-0}" -lt 4 ]]; then
     return 2>/dev/null || exit 1
 fi
 
+# --- Cache helpers for Scheme interpreter state ---
+
+_em_save_cache() {
+    local cache_file="$1" source_file="$2"
+    local tmp_file="${cache_file}.tmp.$$"
+    {
+        printf '# shemacs cache -- %s\n' "$source_file"
+        # Associative arrays: declare -A → declare -gA (global scope)
+        declare -p __bs_car __bs_cdr \
+            __bs_closure_params __bs_closure_body __bs_closure_env \
+            __bs_env __bs_env_parent | sed 's/^declare -A /declare -gA /'
+        # Scalars: declare -- → declare -g --
+        declare -p __bs_heap_next __bs_env_next | sed 's/^declare -- /declare -g -- /'
+        # Re-export top-level defines as bash globals (replicates define side-effect)
+        local key name
+        for key in "${!__bs_env[@]}"; do
+            [[ "$key" == 0:* ]] || continue
+            name="${key#0:}"
+            [[ "$name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || continue
+            printf 'declare -g %s=%q\n' "$name" "${__bs_env[$key]}"
+        done
+    } > "$tmp_file"
+    mv -f "$tmp_file" "$cache_file" 2>/dev/null || { rm -f "$tmp_file"; return 1; }
+}
+
+_em_load_cache() {
+    source "$1" || return 1
+    # Validate: counters must exist and env 0 must have bindings
+    [[ -n "${__bs_heap_next:-}" && -n "${__bs_env_next:-}" ]] || return 1
+    local key; for key in "${!__bs_env[@]}"; do
+        [[ "$key" == 0:* ]] && return 0
+    done
+    return 1
+}
+
 em() {
     local _em_script_dir
     _em_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _em_script_dir=""
 
     # Source the sheme interpreter if not already loaded.
     # Search order: installed ~/.bs.sh, sibling sheme/ repo, common prefixes.
+    local _em_bs_path=""
     if ! type bs &>/dev/null; then
         local _bs_found=""
         for _bs_candidate in \
@@ -40,12 +76,15 @@ em() {
                 /opt/sheme/bs.sh; do
             [[ -n "$_bs_candidate" && -f "$_bs_candidate" ]] || continue
             # shellcheck source=/dev/null
-            source "$_bs_candidate" && _bs_found=1 && break
+            source "$_bs_candidate" && _bs_found="$_bs_candidate" && break
         done
         if [[ -z "$_bs_found" ]]; then
             echo "em: cannot find bs.sh — install sheme: https://github.com/jordanhubbard/sheme" >&2
             return 1
         fi
+        _em_bs_path="$_bs_found"
+    else
+        _em_bs_path="$HOME/.bs.sh"
     fi
     bs-reset
 
@@ -59,7 +98,18 @@ em() {
         echo "em: cannot find em.scm" >&2
         return 1
     fi
-    bs "$(cat "$_em_scm_file")"
+
+    # Load from cache if valid, otherwise evaluate Scheme and save cache.
+    local _em_cache_file="${_em_scm_file}.cache"
+    if [[ -f "$_em_cache_file" \
+          && "$_em_cache_file" -nt "$_em_scm_file" \
+          && ( ! -f "${_em_bs_path:-}" || "$_em_cache_file" -nt "$_em_bs_path" ) ]] \
+       && _em_load_cache "$_em_cache_file"; then
+        : # cached state restored
+    else
+        bs "$(cat "$_em_scm_file")"
+        _em_save_cache "$_em_cache_file" "$_em_scm_file" 2>/dev/null || true
+    fi
 
     # Safety-net trap: restore terminal if killed unexpectedly
     local _em_saved_traps

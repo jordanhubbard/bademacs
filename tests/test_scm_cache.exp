@@ -1,0 +1,98 @@
+#!/usr/bin/expect -f
+# Test: Cache round-trip — first run generates cache, second run uses it
+set timeout 300 ;# Scheme startup (bs loads ~1300 lines) is slow on CI
+
+set script_dir [file dirname [info script]]
+set repo_dir [file join $script_dir ..]
+
+# Determine cache location: em() prefers ~/.em.scm, falls back to repo/em.scm
+if {[file exists "$env(HOME)/.em.scm"]} {
+    set cache_file "$env(HOME)/.em.scm.cache"
+    set scm_file "$env(HOME)/.em.scm"
+} else {
+    set cache_file [file join $repo_dir em.scm.cache]
+    set scm_file [file join $repo_dir em.scm]
+}
+
+# Remove any existing cache
+file delete -force $cache_file
+
+# --- First run: should generate cache ---
+spawn bash [file join $repo_dir em.scm.sh]
+
+expect {
+    "shemacs" { puts "\nPASS: first run — editor started (no cache)" }
+    timeout { puts "\nFAIL: first run — editor did not start"; exit 1 }
+}
+
+set timeout 30
+# C-x C-c to quit
+send "\x18\x03"
+
+expect {
+    eof { puts "PASS: first run — editor exited cleanly" }
+    timeout { puts "FAIL: first run — editor did not exit"; exit 1 }
+}
+
+# Verify cache file was created
+if {![file exists $cache_file]} {
+    puts "FAIL: cache file was not created after first run"
+    exit 1
+}
+puts "PASS: cache file exists after first run"
+
+# --- Second run: should use cache (fast) ---
+set timeout 60 ;# much shorter — cached start should be fast
+spawn bash [file join $repo_dir em.scm.sh]
+
+expect {
+    "shemacs" { puts "PASS: second run — editor started (from cache)" }
+    timeout { puts "FAIL: second run — editor did not start"; exit 1 }
+}
+
+set timeout 30
+# Type some text and verify it renders
+send "Hello from cache"
+
+expect {
+    "Hello from cache" { puts "PASS: second run — text rendered correctly" }
+    timeout { puts "FAIL: second run — text not rendered"; exit 1 }
+}
+
+# C-x C-c to quit (modified buffer, answer 'n' to discard)
+send "\x18\x03"
+
+expect {
+    -re "modified|save|discard" {
+        send "n"
+        expect {
+            eof { puts "PASS: second run — editor exited cleanly" }
+            timeout { puts "FAIL: second run — editor did not exit after discard"; exit 1 }
+        }
+    }
+    eof { puts "PASS: second run — editor exited cleanly" }
+    timeout { puts "FAIL: second run — editor did not exit"; exit 1 }
+}
+
+# --- Third run: invalidate cache by touching the source ---
+exec touch $scm_file
+set timeout 300 ;# full re-evaluation expected
+spawn bash [file join $repo_dir em.scm.sh]
+
+expect {
+    "shemacs" { puts "PASS: third run — editor started (cache invalidated)" }
+    timeout { puts "FAIL: third run — editor did not start after invalidation"; exit 1 }
+}
+
+set timeout 30
+send "\x18\x03"
+
+expect {
+    eof { puts "PASS: third run — editor exited cleanly" }
+    timeout { puts "FAIL: third run — editor did not exit"; exit 1 }
+}
+
+# Clean up cache file
+file delete -force $cache_file
+
+puts "TEST PASSED: scheme cache round-trip"

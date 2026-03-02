@@ -38,6 +38,7 @@ install-scm: install ## Install Scheme-powered em (requires sheme)
 	@echo "Installing Scheme-powered em (requires sheme: https://github.com/jordanhubbard/sheme)..."
 	@cp "$(SRCDIR)/em.scm.sh" "$(HOME)/.em.scm.sh"
 	@cp "$(SRCDIR)/em.scm" "$(HOME)/.em.scm"
+	@rm -f "$(HOME)/.em.scm.cache"
 	@echo "Installed ~/.em.scm.sh and ~/.em.scm"
 	@if ! grep -q 'source.*\.em\.scm\.sh' "$(HOME)/.bashrc" 2>/dev/null; then \
 		echo '' >> "$(HOME)/.bashrc"; \
@@ -58,7 +59,7 @@ uninstall: ## Remove shemacs from home directory
 	@echo "Uninstalled shemacs."
 
 uninstall-scm: ## Remove Scheme-powered em from home directory
-	@rm -f "$(HOME)/.em.scm.sh" "$(HOME)/.em.scm"
+	@rm -f "$(HOME)/.em.scm.sh" "$(HOME)/.em.scm" "$(HOME)/.em.scm.cache"
 	@[ -f "$(HOME)/.bashrc" ] && sed -i '' '/# em - shemacs Scheme/d; /source.*\.em\.scm\.sh/d' "$(HOME)/.bashrc" 2>/dev/null || \
 		sed -i '/# em - shemacs Scheme/d; /source.*\.em\.scm\.sh/d' "$(HOME)/.bashrc" 2>/dev/null || true
 	@echo "Uninstalled Scheme-backed em."

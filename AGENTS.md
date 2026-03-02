@@ -333,6 +333,35 @@ bash- or zsh-specific code.
 2. **Sourced**: `source em.scm.sh` — defines an `em()` shell function that
    runs the editor inside the current shell process for zero-startup overhead.
 
+### Interpreter state caching
+
+Evaluating `em.scm` through the sheme interpreter (~2250 lines of Scheme)
+takes ~37 seconds on a cold start. To avoid this, `em.scm.sh` caches the
+interpreter state after the first evaluation.
+
+**How it works:**
+- `_em_save_cache(cache_file, source_file)` — serializes all `__bs_*`
+  interpreter state (associative arrays, scalars, and top-level defines)
+  into a sourceable bash script via `declare -p` and `printf`. Uses atomic
+  write (temp file + `mv`) to prevent corruption.
+- `_em_load_cache(cache_file)` — sources the cache and validates that
+  the interpreter counters and env-0 bindings are present.
+
+**Cache location:** `${source_file}.cache` — e.g. `em.scm.cache` alongside
+`em.scm` in the repo, or `~/.em.scm.cache` when installed.
+
+**Invalidation:** The cache is skipped (and regenerated) if:
+- `em.scm` is newer than the cache file
+- `bs.sh` (the interpreter) is newer than the cache file
+- The cache file fails validation (corrupt/truncated)
+
+**Troubleshooting:** If the editor behaves strangely after updating sheme
+or em.scm, delete the cache to force regeneration:
+```bash
+rm -f ~/.em.scm.cache    # installed location
+rm -f em.scm.cache       # dev/repo location
+```
+
 ### Architecture diagram
 
 ```

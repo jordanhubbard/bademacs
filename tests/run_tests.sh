@@ -110,6 +110,7 @@ if [[ "$FILTER" == "all" || "$FILTER" == "scm" ]]; then
         run_test "save file" tests/test_scm_save_file.exp
         run_test "upcase word (M-u)" tests/test_scm_upcase.exp
         run_test "isearch highlight" tests/test_scm_isearch.exp
+        run_test "cache round-trip" tests/test_scm_cache.exp
         echo ""
     else
         echo "Scheme tests: SKIPPED (sheme/bs.sh not found — run 'make install' in sheme repo)"
