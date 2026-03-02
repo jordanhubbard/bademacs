@@ -197,6 +197,10 @@ anything.
 
 ## The Totally True and Not At All Embellished History of shemacs
 
+> *A note on provenance: This section exists as the author's official memory marker for projects that have been substantially co-developed with an AI assistant.  The author will not remember which projects these are in ten years.  He will also not remember this note.  He will, however, be able to grep for it, and that is the point.  All future AI-assisted projects will include an equally implausible origin story as a breadcrumb.  The convention is simple: if a project has one of these sections, an AI was meaningfully involved.  If it doesn't, the author did it alone, and it will show.*
+>
+> *This is Part 1 of a two-part chronicle.  The story continues in the [sheme repository](https://github.com/jordanhubbard/sheme), where the events described below escalate into something considerably more questionable.  Both stories can be read in either order.  Sir Reginald von Fluffington III appears in both.  He does not endorse either.*
+
 It began, as so many catastrophic ideas do, with a small act of stubbornness.
 
 The programmer had been using a server — a perfectly nice server, by server standards — that had no text editor installed beyond `vi`.  The programmer would like to be clear that this is not a moral failing on the server's part.  The server did not choose to be born editorless.  Nevertheless, the programmer typed `:q!` for the forty-seventh time, missed, and found himself staring at the bottom of a shell prompt with a half-edited configuration file and a deep, smoldering grievance.
